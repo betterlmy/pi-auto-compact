@@ -14,7 +14,7 @@
 
 ## 目录结构
 
-- `src/`：全部扩展源码（11 个模块：index 注册钩子，compaction/guard 为核心流程，facts 为确定性事实提取，truncate/stats 为工具结果截断与会话统计，command/footer/status 为命令与显示）。
+- `src/`：全部扩展源码（12 个模块：index 注册钩子，compaction/guard 为核心流程，facts 为确定性事实提取，truncate/stats 为工具结果截断与会话统计，progress-color 为渐变进度配色，command/footer/status 为命令与显示）。
 - `test/`：与源码同名的 `*.test.mjs` 测试文件。
 - `.github/workflows/`：`ci.yml`（push/PR 跑 typecheck + test）；`publish.yml`（npm 发布）。
 

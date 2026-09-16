@@ -28,14 +28,20 @@ describe("config.ts: 配置与原生安全网管理", () => {
     assert.equal(config.threshold, 75);
     assert.equal(config.customFooter, false);
     assert.equal(config.autoManageSettings, false);
+    assert.equal(config.progressColor, true);
+    assert.equal(config.maxToolResultChars, 50000);
   });
 
   it("应正确持久化与重新读取配置", () => {
-    saveConfig({ threshold: 85, customFooter: true, autoManageSettings: true }, testConfigPath);
+    saveConfig(
+      { threshold: 85, customFooter: true, autoManageSettings: true, progressColor: false },
+      testConfigPath
+    );
     const loaded = loadConfig(testConfigPath);
     assert.equal(loaded.threshold, 85);
     assert.equal(loaded.customFooter, true);
     assert.equal(loaded.autoManageSettings, true);
+    assert.equal(loaded.progressColor, false);
   });
 
   it("checkNativeSafetyNet 能正确识别非最优的原生配置状态", () => {

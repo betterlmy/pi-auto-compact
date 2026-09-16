@@ -60,6 +60,8 @@ How many times this session compacted, trimmed outputs, or handled an emergency 
 - **Default**: the status bar shows `compact: 75%`, staying out of the way and remaining compatible with UI-appearance plugins.
 - **Takeover**: run `/auto-compact footer` and the usage info merges into the end of Pi's native stats line as `14.1%/1.0M (auto:75%)`; while compacting it shows `(auto:compacting...)`.
 
+In takeover mode the usage numbers change color as usage grows: the closer to the trigger line, the redder. The color is picked by the ratio of current usage to the trigger line — green at the start, amber near the middle, red at the line (e.g. trigger line 60% and current usage 50% picks the color at 50/60 ≈ 83%). Not a fan? Run `/auto-compact progress` to switch back to the fixed red/yellow/blue tiers.
+
 ---
 
 ## Installation
@@ -85,6 +87,7 @@ Works with default settings — no configuration needed.
 | `/auto-compact 80` | Move the auto-compaction trigger line to 80% |
 | `/auto-compact` | Open a dialog to adjust the trigger line |
 | `/auto-compact footer` | Switch status bar style |
+| `/auto-compact progress` | Toggle gradient coloring of the usage numbers |
 | `/auto-compact status` | View current settings and session statistics |
 | `/auto-compact setup` | (Optional) Adjust Pi's built-in fallback compaction settings to recommended values |
 
@@ -98,6 +101,7 @@ Settings live in `~/.pi/agent/auto-compact.json`:
 {
   "threshold": 75,
   "customFooter": false,
+  "progressColor": true,
   "autoManageSettings": false,
   "maxToolResultChars": 50000
 }
@@ -105,6 +109,7 @@ Settings live in `~/.pi/agent/auto-compact.json`:
 
 - `threshold`: the auto-compaction trigger line as a percentage of context usage (default 75). Lower = compacts more often, more relaxed; higher = fewer interruptions but more likely to hit emergency compaction.
 - `customFooter`: whether to use the takeover status bar (default off).
+- `progressColor`: whether the usage numbers shift color with usage (default on). When off, falls back to three fixed tiers: red above 90%, yellow above 70%, blue otherwise.
 - `autoManageSettings`: whether the plugin may adjust Pi's built-in fallback compaction settings for you (default off).
 - `maxToolResultChars`: the character limit for a single output before it enters the context; anything beyond is trimmed (default 50000; set 0 to disable).
 

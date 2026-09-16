@@ -15,8 +15,8 @@ function assistantEntry(input) {
   };
 }
 
-function createFooterHarness(entries) {
-  const theme = { fg: (_color, text) => text };
+function createFooterHarness(entries, { percent = 10, isCompacting = false, threshold = 75, progressColor } = {}) {
+  const theme = { fg: (color, text) => `[${color}]${text}` };
   const tui = { requestRender: () => {} };
   const footerData = {
     onBranchChange: () => () => {},
@@ -26,10 +26,10 @@ function createFooterHarness(entries) {
   };
   const ctx = {
     sessionManager: { getEntries: () => entries, getCwd: () => "/tmp", getSessionName: () => undefined },
-    getContextUsage: () => ({ percent: 10, contextWindow: 1000 }),
+    getContextUsage: () => ({ percent, contextWindow: 1000 }),
     model: { id: "mock-model" },
   };
-  const factory = buildCustomFooterComponent(ctx, () => ({ threshold: 75 }), () => false);
+  const factory = buildCustomFooterComponent(ctx, () => ({ threshold, progressColor }), () => isCompacting);
   return factory(tui, theme, footerData);
 }
 
@@ -52,6 +52,35 @@ describe("footer.ts: 统计聚合与格式化", () => {
     // 长度回退也必须重算
     entries.length = 1;
     assert.ok(comp.render(100).join(" ").includes("↑1.0k"), "长度回退后必须全量重算");
+  });
+
+  it("progressColor 开启（默认）时按用量/阈值渐变着色", () => {
+    // 默认开启：50% 用量、60 阈值 → 渐变色转义（非语义色包装）
+    const defaultOn = createFooterHarness([], { percent: 50, threshold: 60 }).render(100).join(" ");
+    assert.ok(/50\.0%\/1\.0k \(auto:60%\)/.test(defaultOn), `应包含用量文本：${defaultOn}`);
+    assert.ok(defaultOn.includes("\x1b[38;2;"), `默认应输出真彩渐变转义：${defaultOn}`);
+
+    // 接近阈值 → 红端
+    const near = createFooterHarness([], { percent: 74, threshold: 75 }).render(100).join(" ");
+    assert.ok(near.includes("\x1b[38;2;239;"), `接近阈值应为红端：${near}`);
+
+    // 显式开启同样生效：10/75 ≈ 0.133，落在绿→琥珀段（f≈0.267），插值色 (87,192,71)
+    const on = createFooterHarness([], { percent: 10, threshold: 75, progressColor: true }).render(100).join(" ");
+    assert.ok(on.includes("\x1b[38;2;87;192;71m"), `低用量应为绿色插值：${on}`);
+  });
+
+  it("progressColor 关闭时回退三档语义色：>90 红 / >70 黄 / 低用量蓝", () => {
+    // 低用量：整段（百分比+窗口+auto指示）用 mdLink（蓝色）
+    const low = createFooterHarness([], { percent: 10, progressColor: false }).render(100).join(" ");
+    assert.ok(low.includes("[mdLink]10.0%/1.0k (auto:75%)"), `低用量应为 mdLink：${low}`);
+
+    // 中档：warning
+    const mid = createFooterHarness([], { percent: 75, progressColor: false }).render(100).join(" ");
+    assert.ok(mid.includes("[warning]75.0%/1.0k (auto:75%)"), `>70 应为 warning：${mid}`);
+
+    // 高档：error
+    const high = createFooterHarness([], { percent: 95, progressColor: false }).render(100).join(" ");
+    assert.ok(high.includes("[error]95.0%/1.0k (auto:75%)"), `>90 应为 error：${high}`);
   });
 
   it("formatTokens 与 formatCwdForFooter 基础格式化", () => {

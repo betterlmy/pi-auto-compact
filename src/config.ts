@@ -43,6 +43,11 @@ export interface AutoCompactConfig {
    * 默认 false（开源规范：未经用户明确许可不擅自改写主设置文件）
    */
   autoManageSettings?: boolean;
+  /**
+   * 内联 Footer 上下文用量进度渐变配色（绿→黄→红，按「用量/阈值」比值取色）
+   * 默认 true；关闭后回退三档语义色（>90% 红 / >70% 黄 / 其余蓝）
+   */
+  progressColor?: boolean;
 }
 
 export function loadConfig(customConfigPath = CONFIG_PATH): AutoCompactConfig {
@@ -61,6 +66,7 @@ export function loadConfig(customConfigPath = CONFIG_PATH): AutoCompactConfig {
         threshold,
         customFooter: typeof parsed.customFooter === "boolean" ? parsed.customFooter : false,
         autoManageSettings: typeof parsed.autoManageSettings === "boolean" ? parsed.autoManageSettings : false,
+        progressColor: typeof parsed.progressColor === "boolean" ? parsed.progressColor : true,
         maxToolResultChars:
           typeof parsed.maxToolResultChars === "number" &&
           Number.isFinite(parsed.maxToolResultChars) &&
@@ -76,6 +82,7 @@ export function loadConfig(customConfigPath = CONFIG_PATH): AutoCompactConfig {
     threshold: DEFAULT_THRESHOLD,
     customFooter: false,
     autoManageSettings: false,
+    progressColor: true,
     maxToolResultChars: DEFAULT_MAX_TOOL_RESULT_CHARS,
   };
 }

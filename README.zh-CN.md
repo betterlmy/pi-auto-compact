@@ -60,6 +60,8 @@ Pi 自带压缩功能，但默认触发得太晚（通常要到占用 98% 左右
 - **默认**：状态栏显示 `compact: 75%`，不占用其他位置，与界面美化类插件兼容。
 - **接管**：运行 `/auto-compact footer` 后，占用信息合并到 Pi 原生统计行末尾，显示为 `14.1%/1.0M (auto:75%)`；压缩进行中显示 `(auto:compacting...)`。
 
+接管模式下，占用数字会随用量变色：越接近触发线越红——以「当前用量 ÷ 触发线」的比值取色，绿色起步，接近一半时变琥珀色，到达触发线时变红（例如触发线 60%、当前 50%，则取 50/60 ≈ 83% 处的颜色）。不需要的话用 `/auto-compact progress` 关掉，回到红/黄/蓝三档固定色。
+
 ---
 
 ## 安装
@@ -85,6 +87,7 @@ pi install git:github.com/betterlmy/pi-auto-compact
 | `/auto-compact 80` | 把自动压缩的触发线调整为 80% |
 | `/auto-compact` | 打开对话框调整触发线 |
 | `/auto-compact footer` | 切换状态栏显示方式 |
+| `/auto-compact progress` | 切换占用数字的渐变变色 |
 | `/auto-compact status` | 查看当前设置和会话统计 |
 | `/auto-compact setup` | （可选）把 Pi 自带的兜底压缩配置调整为推荐值 |
 
@@ -98,6 +101,7 @@ pi install git:github.com/betterlmy/pi-auto-compact
 {
   "threshold": 75,
   "customFooter": false,
+  "progressColor": true,
   "autoManageSettings": false,
   "maxToolResultChars": 50000
 }
@@ -105,6 +109,7 @@ pi install git:github.com/betterlmy/pi-auto-compact
 
 - `threshold`：自动压缩的触发线，上下文占用的百分比（默认 75）。调低，压缩更频繁、更从容；调高，打扰更少，但更容易触发紧急压缩。
 - `customFooter`：是否使用接管式状态栏（默认关闭）。
+- `progressColor`：占用数字是否随用量渐变变色（默认开启）。关闭后改为三档固定色：超过 90% 红色、超过 70% 黄色、其余蓝色。
 - `autoManageSettings`：是否允许插件自动调整 Pi 自带的兜底压缩配置（默认关闭）。
 - `maxToolResultChars`：单条输出进入上下文前的字符数上限，超出部分裁剪（默认 50000，设为 0 关闭）。
 

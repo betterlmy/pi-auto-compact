@@ -121,7 +121,7 @@ export default function (pi: ExtensionAPI) {
 
   // 7. 注册 /auto-compact 命令
   pi.registerCommand("auto-compact", {
-    description: "查看或配置自动压缩 (用法: /auto-compact [数值|setup|footer|status])",
+    description: "查看或配置自动压缩 (用法: /auto-compact [数值|setup|footer|progress|status])",
     handler: (args, ctx) => handleAutoCompactCommand(state, args, ctx),
   });
 }

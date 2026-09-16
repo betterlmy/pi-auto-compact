@@ -1,7 +1,8 @@
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { getCapabilities, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { AutoCompactConfig } from "./config.ts";
+import { colorizeProgress, progressRatio } from "./progress-color.ts";
 
 export function formatTokens(count: number): string {
   if (count < 1000) return count.toString();
@@ -136,13 +137,20 @@ export function buildCustomFooterComponent(
             ? `?/${formatTokens(contextWindow)}${autoIndicator}`
             : `${contextPercent}%/${formatTokens(contextWindow)}${autoIndicator}`;
 
+        // 渐变进度色（可配置关闭）：以「用量/阈值」比值在绿→琥珀→红间取色；
+        // 关闭时回退三档语义色（与 pi 原生 footer 的 90/70 分界一致，低用量补 mdLink 蓝）。
+        // contextPercentDisplay 是 statsLeft 的最后一段，彩色重置码不会破坏外层 dim 包装。
         let contextPercentStr: string;
-        if (contextPercentValue > 90) {
+        if (config.progressColor !== false) {
+          const ratio = progressRatio(contextPercentValue, config.threshold);
+          const trueColor = getCapabilities().trueColor;
+          contextPercentStr = colorizeProgress(contextPercentDisplay, ratio, trueColor);
+        } else if (contextPercentValue > 90) {
           contextPercentStr = theme.fg("error", contextPercentDisplay);
         } else if (contextPercentValue > 70) {
           contextPercentStr = theme.fg("warning", contextPercentDisplay);
         } else {
-          contextPercentStr = contextPercentDisplay;
+          contextPercentStr = theme.fg("mdLink", contextPercentDisplay);
         }
         statsParts.push(contextPercentStr);
 

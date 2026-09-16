@@ -76,13 +76,29 @@ export async function handleAutoCompactCommand(
     return;
   }
 
+  // 子命令：/auto-compact progress
+  if (trimmed === "progress") {
+    state.config.progressColor = state.config.progressColor === false;
+    saveConfig(state.config);
+    updateStatusDisplay(state, ctx);
+    if (ctx.hasUI) {
+      ctx.ui.notify(
+        state.config.progressColor
+          ? "已开启进度渐变配色（绿→黄→红，按「用量/阈值」取色）。"
+          : "已关闭进度渐变配色，回退三档语义色（>90% 红 / >70% 黄 / 其余蓝）。",
+        "info"
+      );
+    }
+    return;
+  }
+
   // 子命令：/auto-compact status
   if (trimmed === "status") {
     const usage = ctx.getContextUsage?.();
     const cur = usage?.percent !== null && usage?.percent !== undefined ? `${usage.percent.toFixed(1)}%` : "未知";
     const truncateLimit = state.config.maxToolResultChars ?? 0;
     ctx.ui.notify(
-      `[Auto Compact 状态]\n- 当前阈值: ${state.config.threshold}%\n- 紧急熔断线: ${EMERGENCY_THRESHOLD}%\n- 当前上下文用量: ${cur}\n- 工具结果截断上限: ${truncateLimit > 0 ? `${truncateLimit} 字符` : "禁用"}\n- 内联 Footer: ${state.config.customFooter ? "开启" : "关闭"}\n- 自动守护设置: ${state.config.autoManageSettings ? "开启" : "关闭"}\n\n【会话统计】\n${formatStats(state.stats)}`,
+      `[Auto Compact 状态]\n- 当前阈值: ${state.config.threshold}%\n- 紧急熔断线: ${EMERGENCY_THRESHOLD}%\n- 当前上下文用量: ${cur}\n- 工具结果截断上限: ${truncateLimit > 0 ? `${truncateLimit} 字符` : "禁用"}\n- 内联 Footer: ${state.config.customFooter ? "开启" : "关闭"}\n- 进度渐变配色: ${state.config.progressColor === false ? "关闭" : "开启"}\n- 自动守护设置: ${state.config.autoManageSettings ? "开启" : "关闭"}\n\n【会话统计】\n${formatStats(state.stats)}`,
       "info"
     );
     return;
