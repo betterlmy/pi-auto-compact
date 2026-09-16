@@ -26,8 +26,9 @@ export function progressRatio(percent: number, threshold: number): number {
 export function gradientRgb(ratio: number): Rgb {
   const t = Math.min(1, Math.max(0, ratio));
   for (let i = 1; i < STOPS.length; i++) {
-    const prev = STOPS[i - 1]!;
-    const next = STOPS[i]!;
+    const prev = STOPS[i - 1];
+    const next = STOPS[i];
+    if (!prev || !next) continue;
     if (t <= next.at) {
       const span = next.at - prev.at;
       const f = span <= 0 ? 0 : (t - prev.at) / span;
@@ -38,7 +39,8 @@ export function gradientRgb(ratio: number): Rgb {
       };
     }
   }
-  return STOPS[STOPS.length - 1]!.rgb;
+  const last = STOPS[STOPS.length - 1];
+  return last?.rgb ?? { r: 239, g: 68, b: 68 };
 }
 
 /** RGB → xterm 256 色号：灰阶走 232-255，其余量化到 6x6x6 立方体 */

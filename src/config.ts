@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -94,7 +94,17 @@ export function loadConfig(customConfigPath = CONFIG_PATH): AutoCompactConfig {
 function atomicWriteJson(filePath: string, value: unknown): void {
   const tmpPath = `${filePath}.tmp-${process.pid}`;
   writeFileSync(tmpPath, JSON.stringify(value, null, 2), "utf-8");
-  renameSync(tmpPath, filePath);
+  try {
+    renameSync(tmpPath, filePath);
+  } catch (err) {
+    // rename 失败时清理残留的临时文件
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      // 清理失败不阻塞原始错误传播
+    }
+    throw err;
+  }
 }
 
 export function saveConfig(config: AutoCompactConfig, customConfigPath = CONFIG_PATH): boolean {

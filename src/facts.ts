@@ -25,6 +25,7 @@ export function extractSessionFacts(sessionManager?: { getEntries(): any[] } | n
   const modifiedSet = new Set<string>();
   const read = new Set<string>();
   const commands: string[] = [];
+  const commandSet = new Set<string>();
   let goalText: string | undefined;
 
   const trackModified = (path: string) => {
@@ -77,7 +78,8 @@ export function extractSessionFacts(sessionManager?: { getEntries(): any[] } | n
 
             if (block.name === "bash" && typeof args.command === "string") {
               const cmd = args.command.trim();
-              if (cmd && !commands.includes(cmd)) {
+              if (cmd && !commandSet.has(cmd)) {
+                commandSet.add(cmd);
                 commands.push(cmd);
               }
             }
