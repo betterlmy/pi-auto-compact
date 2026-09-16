@@ -1,9 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
+import { createJiti } from "jiti";
 
-const require = createRequire(import.meta.url);
-const { createJiti } = require("/home/zane/.local/share/pnpm/global/v11/190f-18d39bf9a8289828-0/node_modules/.pnpm/jiti@2.7.0/node_modules/jiti");
 const jiti = createJiti(import.meta.url);
 const { extractSessionFacts, buildCompactionInstructions } = jiti("../src/facts.ts");
 

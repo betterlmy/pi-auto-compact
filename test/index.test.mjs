@@ -3,13 +3,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, unlinkSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRequire } from "node:module";
+import { createJiti } from "jiti";
 
-const require = createRequire(import.meta.url);
-const { createJiti } = require("/home/zane/.local/share/pnpm/global/v11/190f-18d39bf9a8289828-0/node_modules/.pnpm/jiti@2.7.0/node_modules/jiti");
-const pnpmPiTui = "/home/zane/.local/share/pnpm/global/v11/190f-18d39bf9a8289828-0/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.85.1_ws@8.21.3/node_modules/@earendil-works/pi-tui/dist/index.js";
-
-const EXTENSION_ENTRY = "/home/zane/ais/pi-auto-compact/src/index.ts";
+const jiti = createJiti(import.meta.url);
 
 function createMockPi() {
   const handlers = new Map();
@@ -103,10 +99,7 @@ describe("index.ts: 扩展核心集成测试", () => {
     mkdirSync(piAgentDir, { recursive: true });
     process.env.HOME = tempHome;
 
-    const jiti = createJiti(EXTENSION_ENTRY, {
-      alias: { "@earendil-works/pi-tui": pnpmPiTui },
-    });
-    extensionFactory = jiti(EXTENSION_ENTRY).default;
+    extensionFactory = jiti("../src/index.ts").default;
   });
 
   after(() => {
