@@ -1,0 +1,45 @@
+{
+  "name": "@betterlmy/pi-auto-compact",
+  "version": "1.0.0",
+  "description": "Deterministic, context-guarded automatic compaction extension for Pi Coding Agent with dual watermarks and inline status display.",
+  "type": "module",
+  "main": "src/index.ts",
+  "files": [
+    "src",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "auto-compact",
+    "compaction",
+    "context-management",
+    "ai-agent"
+  ],
+  "author": "betterlmy <betterlmy@icloud.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/betterlmy/pi-auto-compact.git"
+  },
+  "bugs": {
+    "url": "https://github.com/betterlmy/pi-auto-compact/issues"
+  },
+  "homepage": "https://github.com/betterlmy/pi-auto-compact#readme",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.84.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0"
+  }
+}
