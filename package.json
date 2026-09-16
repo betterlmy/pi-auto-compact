@@ -16,7 +16,8 @@
     ]
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "pi-package",
@@ -46,6 +47,7 @@
     "@earendil-works/pi-coding-agent": "^0.85.1",
     "@earendil-works/pi-tui": "^0.85.1",
     "@types/node": "^24.0.0",
-    "jiti": "^2.7.0"
+    "jiti": "^2.7.0",
+    "typescript": "^5.9.3"
   }
 }

@@ -31,6 +31,32 @@ export function buildCustomFooterComponent(
   return (tui: any, theme: any, footerData: any) => {
     const unsubBranch = footerData?.onBranchChange?.(() => tui.requestRender()) || (() => {});
 
+    // 增量缓存：render 每帧都会调用，长会话下必须避免重复遍历全部 entries
+    const usage = {
+      count: 0,
+      lastEntry: undefined as unknown,
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cost: 0,
+      latestPromptTokens: 0,
+      latestCacheRead: 0,
+    };
+
+    const addUsage = (u: any, trackLatest: boolean) => {
+      if (!u) return;
+      usage.input += u.input || 0;
+      usage.output += u.output || 0;
+      usage.cacheRead += u.cacheRead || 0;
+      usage.cacheWrite += u.cacheWrite || 0;
+      if (u.cost?.total) usage.cost += u.cost.total;
+      if (trackLatest) {
+        usage.latestPromptTokens = (u.input || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0);
+        usage.latestCacheRead = u.cacheRead || 0;
+      }
+    };
+
     return {
       dispose: () => {
         unsubBranch();
@@ -40,48 +66,35 @@ export function buildCustomFooterComponent(
         const config = getConfig();
         const isCompacting = getIsCompacting();
 
-        // 1. 统计累积 Token 和花费
-        let input = 0;
-        let output = 0;
-        let cacheRead = 0;
-        let cacheWrite = 0;
-        let cost = 0;
-        let latestPromptTokens = 0;
-        let latestCacheRead = 0;
-
+        // 1. 统计累积 Token 和花费（仅在 entries 追加时增量累加；
+        //    长度回退或末条变化（分支切换）时全量重算）
         const entries = ctx.sessionManager?.getEntries?.() || [];
-        for (const entry of entries) {
+        const canAppend =
+          usage.count > 0 && entries.length >= usage.count && entries[usage.count - 1] === usage.lastEntry;
+        if (!canAppend) {
+          usage.input = 0;
+          usage.output = 0;
+          usage.cacheRead = 0;
+          usage.cacheWrite = 0;
+          usage.cost = 0;
+          usage.latestPromptTokens = 0;
+          usage.latestCacheRead = 0;
+          usage.count = 0;
+        }
+        for (let i = usage.count; i < entries.length; i++) {
+          const entry = entries[i];
           if (entry.type === "message" && entry.message?.role === "assistant") {
-            const u = entry.message.usage;
-            if (u) {
-              input += u.input || 0;
-              output += u.output || 0;
-              cacheRead += u.cacheRead || 0;
-              cacheWrite += u.cacheWrite || 0;
-              if (u.cost?.total) cost += u.cost.total;
-              latestPromptTokens = (u.input || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0);
-              latestCacheRead = u.cacheRead || 0;
-            }
+            addUsage(entry.message.usage, true);
           } else if (entry.type === "message" && entry.message?.role === "toolResult" && entry.message.usage) {
-            const u = entry.message.usage;
-            if (u) {
-              input += u.input || 0;
-              output += u.output || 0;
-              cacheRead += u.cacheRead || 0;
-              cacheWrite += u.cacheWrite || 0;
-              if (u.cost?.total) cost += u.cost.total;
-            }
+            addUsage(entry.message.usage, false);
           } else if ((entry.type === "branch_summary" || entry.type === "compaction") && entry.usage) {
-            const u = entry.usage;
-            if (u) {
-              input += u.input || 0;
-              output += u.output || 0;
-              cacheRead += u.cacheRead || 0;
-              cacheWrite += u.cacheWrite || 0;
-              if (u.cost?.total) cost += u.cost.total;
-            }
+            addUsage(entry.usage, false);
           }
         }
+        usage.count = entries.length;
+        usage.lastEntry = entries.length > 0 ? entries[entries.length - 1] : undefined;
+
+        const { input, output, cacheRead, cacheWrite, cost, latestPromptTokens, latestCacheRead } = usage;
 
         // 2. 第一行：路径、Git 分支、Session 名字
         let pwd = formatCwdForFooter(

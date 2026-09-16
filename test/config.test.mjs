@@ -58,4 +58,34 @@ describe("config.ts: 配置与原生安全网管理", () => {
     const status = checkNativeSafetyNet(testSettingsPath);
     assert.equal(status.isOptimal, true);
   });
+
+  it("checkNativeSafetyNet 对缺失或损坏的 settings.json 不应误判为已最优", () => {
+    const missing = checkNativeSafetyNet(join(tempDir, "missing-settings.json"));
+    assert.equal(missing.isOptimal, false);
+    assert.ok(missing.message?.includes("未找到"));
+
+    const corruptPath = join(tempDir, "corrupt-settings.json");
+    writeFileSync(corruptPath, "{ not valid json");
+    const corrupt = checkNativeSafetyNet(corruptPath);
+    assert.equal(corrupt.isOptimal, false);
+    assert.ok(corrupt.message?.includes("无法解析"));
+  });
+
+  it("applyNativeSafetyNet 在 settings.json 缺失时应创建并写入最佳配置", () => {
+    const newPath = join(tempDir, "nested", "settings.json");
+    const ok = applyNativeSafetyNet(newPath);
+    assert.equal(ok, true);
+
+    const created = JSON.parse(readFileSync(newPath, "utf-8"));
+    assert.equal(created.compaction.enabled, true);
+    assert.equal(created.compaction.reserveTokens, 50000);
+    assert.equal(checkNativeSafetyNet(newPath).isOptimal, true);
+  });
+
+  it("applyNativeSafetyNet 遇到损坏 JSON 时应拒绝覆盖并返回 false", () => {
+    const corruptPath = join(tempDir, "corrupt-keep.json");
+    writeFileSync(corruptPath, "{ broken");
+    assert.equal(applyNativeSafetyNet(corruptPath), false);
+    assert.equal(readFileSync(corruptPath, "utf-8"), "{ broken");
+  });
 });

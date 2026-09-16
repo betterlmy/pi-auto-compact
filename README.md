@@ -41,7 +41,7 @@ Pi's built-in auto-compaction relies solely on a fixed absolute token reserve (`
    ───▶ 75% Gentle Compaction (runs only at agent_settled idle point)
 ```
 
-- **Gentle Compaction (Default: 75%)**: Rising-edge triggered only when the agent run has fully settled (`agent_settled`) and the session is idle. Never cuts in the middle of active tool execution.
+- **Gentle Compaction (Default: 75%)**: Level-triggered — it fires whenever the agent run has fully settled (`agent_settled`), the session is idle, and usage is at or above the threshold (no rising edge required). After a failed attempt it waits for usage to grow before retrying, so it never busy-loops at the same watermark. Never cuts in the middle of active tool execution.
 - **Emergency Ceiling (92%)**: If a single tool call (e.g. huge build log, massive diff) blows context usage past 92%, it halts on the spot, compacts with full fact preservation, and automatically resumes the turn.
 
 ### 2. Deterministic Fact Extraction (Inspired by `pi-smart-compact`)

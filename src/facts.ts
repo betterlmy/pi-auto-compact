@@ -7,16 +7,31 @@ export interface SessionFacts {
   goalText?: string;
 }
 
+/** 注入压缩提示词的各类事实上限，避免长会话反向放大待压缩上下文 */
+export const MAX_MODIFIED_FILES = 30;
+export const MAX_READ_FILES = 15;
+export const MAX_RECENT_COMMANDS = 8;
+
 /**
  * 确定性事实提取器：从会话历史中提取修改的文件、查阅的文件与关键执行命令
  * 避免总结模型因上下文过大而遗忘精确路径或产生幻觉。
  */
 export function extractSessionFacts(sessionManager: { getEntries(): any[] }): SessionFacts {
-  const written = new Set<string>();
-  const edited = new Set<string>();
+  // 按触碰顺序记录修改文件，重复出现时移到末尾，保证截断后保留最近改动的文件
+  const modifiedOrder: string[] = [];
+  const modifiedSet = new Set<string>();
   const read = new Set<string>();
   const commands: string[] = [];
   let goalText: string | undefined;
+
+  const trackModified = (path: string) => {
+    if (modifiedSet.has(path)) {
+      const index = modifiedOrder.indexOf(path);
+      if (index !== -1) modifiedOrder.splice(index, 1);
+    }
+    modifiedSet.add(path);
+    modifiedOrder.push(path);
+  };
 
   const entries = sessionManager?.getEntries?.() || [];
   for (const entry of entries) {
@@ -53,8 +68,7 @@ export function extractSessionFacts(sessionManager: { getEntries(): any[] }): Se
                   : undefined;
 
             if (rawPath) {
-              if (block.name === "write") written.add(rawPath);
-              else if (block.name === "edit") edited.add(rawPath);
+              if (block.name === "write" || block.name === "edit") trackModified(rawPath);
               else if (block.name === "read") read.add(rawPath);
             }
 
@@ -76,10 +90,12 @@ export function extractSessionFacts(sessionManager: { getEntries(): any[] }): Se
     }
   }
 
-  const allModified = new Set([...written, ...edited]);
-  const modifiedFiles = Array.from(allModified).sort();
-  const readOnlyFiles = Array.from(read).filter((p) => !allModified.has(p)).slice(-15).sort();
-  const recentCommands = commands.slice(-8);
+  const modifiedFiles = modifiedOrder.slice(-MAX_MODIFIED_FILES).sort();
+  const readOnlyFiles = Array.from(read)
+    .filter((p) => !modifiedSet.has(p))
+    .slice(-MAX_READ_FILES)
+    .sort();
+  const recentCommands = commands.slice(-MAX_RECENT_COMMANDS);
 
   return {
     modifiedFiles,

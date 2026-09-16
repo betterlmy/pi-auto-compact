@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createJiti } from "jiti";
 
 const jiti = createJiti(import.meta.url);
-const { extractSessionFacts, buildCompactionInstructions } = jiti("../src/facts.ts");
+const { extractSessionFacts, buildCompactionInstructions, MAX_MODIFIED_FILES } = jiti("../src/facts.ts");
 
 describe("facts.ts: 确定性事实提取器", () => {
   it("应准确提取 write / edit 修改的文件，剔除 read 重复项，并提取 bash 命令与目标", () => {
@@ -59,5 +59,34 @@ describe("facts.ts: 确定性事实提取器", () => {
 
     const prompt = buildCompactionInstructions(facts);
     assert.ok(!prompt.includes("【确定性事实底座"), "无事实时不应添加事实块");
+  });
+
+  it("modifiedFiles 超过上限时按最近触碰顺序截断", () => {
+    const content = [];
+    for (let i = 0; i < 40; i++) {
+      content.push({ type: "toolCall", name: "edit", arguments: { path: `src/f${i}.ts` } });
+    }
+    const facts = extractSessionFacts({
+      getEntries: () => [{ type: "message", message: { role: "assistant", content } }],
+    });
+
+    assert.equal(facts.modifiedFiles.length, MAX_MODIFIED_FILES);
+    assert.ok(facts.modifiedFiles.includes("src/f39.ts"), "必须保留最近触碰的文件");
+    assert.ok(!facts.modifiedFiles.includes("src/f0.ts"), "最早的文件应被截断");
+  });
+
+  it("重复修改的文件按最近一次触碰排序，截断时保留", () => {
+    const content = [{ type: "toolCall", name: "edit", arguments: { path: "src/old.ts" } }];
+    for (let i = 0; i < 35; i++) {
+      content.push({ type: "toolCall", name: "edit", arguments: { path: `src/n${i}.ts` } });
+    }
+    content.push({ type: "toolCall", name: "edit", arguments: { path: "src/old.ts" } });
+
+    const facts = extractSessionFacts({
+      getEntries: () => [{ type: "message", message: { role: "assistant", content } }],
+    });
+
+    assert.equal(facts.modifiedFiles.length, MAX_MODIFIED_FILES);
+    assert.ok(facts.modifiedFiles.includes("src/old.ts"), "最近重新触碰的旧文件必须保留");
   });
 });

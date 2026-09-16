@@ -76,6 +76,8 @@ function createMockCtx(options = {}) {
         opts?.onComplete?.();
       } else if (options.compactBehavior === "sync-error") {
         opts?.onError?.(new Error(options.compactErrorMessage || "mock compact failure"));
+      } else if (options.compactBehavior === "throw") {
+        throw new Error(options.compactErrorMessage || "mock compact throw");
       }
     },
     _notifications: notifications,
@@ -247,7 +249,38 @@ describe("index.ts: 扩展核心集成测试", () => {
     assert.ok(sent[0].msg.content.includes("src/critical.ts"));
   });
 
-  it("7. /auto-compact setup 命令在用户确认后安全优化原生安全网", async () => {
+  it("7. agent_settled 电平触发：高于阈值即触发，失败后不空转、增长后放行、回落后重新武装", () => {
+    const pi = createMockPi();
+    extensionFactory(pi);
+
+    const onSettled = pi._getHandler("agent_settled");
+
+    // 首次沉淀即高于阈值（扩展中途加载/恢复会话场景），必须触发
+    const ctx1 = createMockCtx({ percent: 76, compactBehavior: "sync-error", compactErrorMessage: "boom" });
+    onSettled({}, ctx1);
+    assert.equal(ctx1._isCompactCalled(), true, "首次高于阈值必须触发");
+
+    // 失败后同一水位不原地重试
+    const ctx2 = createMockCtx({ percent: 76 });
+    onSettled({}, ctx2);
+    assert.equal(ctx2._isCompactCalled(), false, "同一水位失败后不得空转重试");
+
+    // 用量增长后自动放行重试
+    const ctx3 = createMockCtx({ percent: 78, compactBehavior: "sync-complete" });
+    onSettled({}, ctx3);
+    assert.equal(ctx3._isCompactCalled(), true, "用量增长后必须放行重试");
+
+    // 回落到阈值以下后重新武装，再次超过阈值可触发
+    const ctx4 = createMockCtx({ percent: 68 });
+    onSettled({}, ctx4);
+    assert.equal(ctx4._isCompactCalled(), false);
+
+    const ctx5 = createMockCtx({ percent: 77 });
+    onSettled({}, ctx5);
+    assert.equal(ctx5._isCompactCalled(), true, "回落后再次超过阈值必须触发");
+  });
+
+  it("8. /auto-compact setup 命令在用户确认后安全优化原生安全网", async () => {
     const pi = createMockPi();
     extensionFactory(pi);
 
@@ -264,5 +297,80 @@ describe("index.ts: 扩展核心集成测试", () => {
     const updated = JSON.parse(readFileSync(settingsPath, "utf-8"));
     assert.equal(updated.compaction.enabled, true);
     assert.equal(updated.compaction.reserveTokens, 50000);
+  });
+
+  it("9. ctx.compact 同步抛错时释放状态锁，不阻塞后续触发", () => {
+    const pi = createMockPi();
+    extensionFactory(pi);
+
+    const onSettled = pi._getHandler("agent_settled");
+
+    const ctx1 = createMockCtx({ percent: 76, compactBehavior: "throw", compactErrorMessage: "sync boom" });
+    assert.doesNotThrow(() => onSettled({}, ctx1), "同步抛错应在扩展内部被捕获，不向运行时冒泡");
+    assert.ok(
+      ctx1._notifications.some((n) => n.msg.includes("压缩调用失败")),
+      "同步抛错必须向用户发出告警"
+    );
+
+    // 若 isCompacting 未释放，此处会被开头守卫直接 return，永远不会再调用 compact
+    const ctx2 = createMockCtx({ percent: 78, compactBehavior: "sync-complete" });
+    onSettled({}, ctx2);
+    assert.equal(ctx2._isCompactCalled(), true, "抛错后状态锁必须释放，用量增长后仍可触发");
+  });
+
+  it("10. isCompacting 陈旧时在 agent_settled 自愈，避免触发点被永久挡死", () => {
+    const pi = createMockPi();
+    extensionFactory(pi);
+
+    const onSettled = pi._getHandler("agent_settled");
+
+    // 模拟压缩既不回调也不发事件（SDK 成功路径跳过 session_compact 的情形）
+    const ctx1 = createMockCtx({ percent: 76 });
+    onSettled({}, ctx1);
+    assert.equal(ctx1._isCompactCalled(), true);
+
+    // 非空闲时不自愈，守卫继续挡住触发
+    const ctx2 = createMockCtx({ percent: 80, compactBehavior: "sync-complete", isIdle: false });
+    onSettled({}, ctx2);
+    assert.equal(ctx2._isCompactCalled(), false, "非空闲时不得自愈或触发");
+
+    // 空闲时陈旧状态锁被自愈释放，用量增长后重新触发
+    const ctx3 = createMockCtx({ percent: 80, compactBehavior: "sync-complete", isIdle: true });
+    onSettled({}, ctx3);
+    assert.equal(ctx3._isCompactCalled(), true, "空闲时陈旧状态锁必须被自愈释放");
+  });
+
+  it("11. session_start 在原生安全网已最优时不重复改写 settings.json", () => {
+    writeFileSync(
+      join(piAgentDir, "auto-compact.json"),
+      JSON.stringify({ threshold: 75, autoManageSettings: true })
+    );
+    const settingsPath = join(piAgentDir, "settings.json");
+    writeFileSync(settingsPath, JSON.stringify({ compaction: { enabled: true, reserveTokens: 60000 } }));
+
+    const pi = createMockPi();
+    extensionFactory(pi);
+    pi._getHandler("session_start")({}, createMockCtx());
+
+    const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    assert.equal(settings.compaction.reserveTokens, 60000, "已最优时不得被改写回 50000");
+  });
+
+  it("12. 紧急熔断续跑在非空闲时也投递（交由 sendMessage 排队）", async () => {
+    const pi = createMockPi();
+    extensionFactory(pi);
+
+    const onTurnEnd = pi._getHandler("turn_end");
+    const toolMsg = {
+      role: "assistant",
+      content: [{ type: "toolCall", name: "read", arguments: { path: "huge.log" } }],
+    };
+    const ctx = createMockCtx({ percent: 93, compactBehavior: "sync-complete", isIdle: false });
+
+    onTurnEnd({ message: toolMsg }, ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const sent = pi._getSentMessages();
+    assert.ok(sent.some((s) => s.msg.customType === "auto-compact/resume"), "非空闲时不得静默丢弃续跑消息");
   });
 });

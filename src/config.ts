@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export const CONFIG_PATH = join(homedir(), ".pi", "agent", "auto-compact.json");
 export const SETTINGS_PATH = join(homedir(), ".pi", "agent", "settings.json");
@@ -71,17 +71,23 @@ export interface SafetyNetStatus {
  * 只读检测原生 compaction 配置状态，不擅自改写文件（开源友好）
  */
 export function checkNativeSafetyNet(customSettingsPath = SETTINGS_PATH): SafetyNetStatus {
+  // “未找到”与“无法解析”都不能当作“已最优”，否则会静默掩盖配置缺失或损坏。
+  if (!existsSync(customSettingsPath)) {
+    return {
+      isOptimal: false,
+      enabled: false,
+      reserveTokens: 16384,
+      message: `未找到 ${customSettingsPath}，原生安全网尚未配置。执行 /auto-compact setup 可创建并配置。`,
+    };
+  }
   try {
-    if (!existsSync(customSettingsPath)) {
-      return { isOptimal: true, enabled: true, reserveTokens: 16384 };
-    }
     const settings = JSON.parse(readFileSync(customSettingsPath, "utf-8"));
     const compaction = settings.compaction ?? {};
     const enabled = compaction.enabled ?? true;
     const reserveTokens = compaction.reserveTokens ?? 16384;
 
-    // 推荐模式：原生 enabled: true 且 reserveTokens 足够大（如 50000），充当 95% 极限熔断网
-    const isOptimal = enabled === true && reserveTokens === NATIVE_RESERVE_TOKENS;
+    // 推荐模式：原生 enabled: true 且 reserveTokens 不低于推荐值，充当 95% 极限熔断网
+    const isOptimal = enabled === true && reserveTokens >= NATIVE_RESERVE_TOKENS;
 
     let message: string | undefined;
     if (!enabled) {
@@ -92,7 +98,12 @@ export function checkNativeSafetyNet(customSettingsPath = SETTINGS_PATH): Safety
 
     return { isOptimal, enabled, reserveTokens, message };
   } catch {
-    return { isOptimal: true, enabled: true, reserveTokens: 16384 };
+    return {
+      isOptimal: false,
+      enabled: false,
+      reserveTokens: 16384,
+      message: `${customSettingsPath} 无法解析（JSON 格式损坏或权限不足），已跳过检测且不会覆盖该文件。`,
+    };
   }
 }
 
@@ -101,10 +112,13 @@ export function checkNativeSafetyNet(customSettingsPath = SETTINGS_PATH): Safety
  */
 export function applyNativeSafetyNet(customSettingsPath = SETTINGS_PATH): boolean {
   try {
-    if (!existsSync(customSettingsPath)) return false;
-    const settings = JSON.parse(readFileSync(customSettingsPath, "utf-8"));
+    // 文件不存在时按空配置创建（用户已在命令中确认），存在但损坏时由 JSON.parse 抛错拒绝覆盖
+    const settings = existsSync(customSettingsPath)
+      ? JSON.parse(readFileSync(customSettingsPath, "utf-8"))
+      : {};
     const compaction = settings.compaction ?? {};
     settings.compaction = { ...compaction, enabled: true, reserveTokens: NATIVE_RESERVE_TOKENS };
+    mkdirSync(dirname(customSettingsPath), { recursive: true });
     writeFileSync(customSettingsPath, JSON.stringify(settings, null, 2), "utf-8");
     return true;
   } catch (error) {
