@@ -5,6 +5,11 @@ import { createJiti } from "jiti";
 const jiti = createJiti(import.meta.url);
 const { buildCustomFooterComponent, formatTokens, formatCwdForFooter } = jiti("../src/footer.ts");
 
+// CI 终端无真彩能力，getCapabilities().trueColor 会返回 false 导致降级到 256 色。
+// 用 pi-tui 官方覆盖变量钉住能力，使渐变断言确定性命中 24-bit 路径；
+// getCapabilities 在首次调用时读取该变量并缓存，早于任何 render() 执行即可。
+process.env.PI_TRUE_COLOR = "1";
+
 function assistantEntry(input) {
   return {
     type: "message",
