@@ -4,6 +4,7 @@
 
 **面向 Pi Coding Agent 的工业级双水位自动压缩与事实守护扩展**
 
+[![npm version](https://img.shields.io/npm/v/@betterlmy/pi-auto-compact.svg)](https://www.npmjs.com/package/@betterlmy/pi-auto-compact)
 [![Pi Extension](https://img.shields.io/badge/Pi-Extension-blue.svg)](https://pi.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![CI](https://github.com/betterlmy/pi-auto-compact/actions/workflows/ci.yml/badge.svg)](https://github.com/betterlmy/pi-auto-compact/actions)
@@ -75,9 +76,13 @@ Pi 内置的 auto-compact 采用固定绝对剩余 Token（`compaction.reserveTo
 
 ## 安装方式
 
-使用 Pi 官方扩展包管理器直接从 GitHub 安装：
+使用 Pi 官方扩展包管理器直接安装：
 
 ```bash
+# 推荐方式：从 npm 源安装
+pi install npm:@betterlmy/pi-auto-compact
+
+# 或者直接从 GitHub 仓库安装
 pi install git:github.com/betterlmy/pi-auto-compact
 ```
 

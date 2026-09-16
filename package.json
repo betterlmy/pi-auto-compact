@@ -36,6 +36,9 @@
     "url": "https://github.com/betterlmy/pi-auto-compact/issues"
   },
   "homepage": "https://github.com/betterlmy/pi-auto-compact#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.84.0"
   },

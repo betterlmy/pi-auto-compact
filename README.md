@@ -4,6 +4,7 @@
 
 **Deterministic, context-guarded automatic compaction extension for the Pi Coding Agent with dual watermarks and inline status display.**
 
+[![npm version](https://img.shields.io/npm/v/@betterlmy/pi-auto-compact.svg)](https://www.npmjs.com/package/@betterlmy/pi-auto-compact)
 [![Pi Extension](https://img.shields.io/badge/Pi-Extension-blue.svg)](https://pi.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![CI](https://github.com/betterlmy/pi-auto-compact/actions/workflows/ci.yml/badge.svg)](https://github.com/betterlmy/pi-auto-compact/actions)
@@ -75,9 +76,13 @@ Immediately after compaction finishes (`session_compact`):
 
 ## Installation
 
-Install directly with Pi's built-in package manager:
+Install using Pi's built-in package manager:
 
 ```bash
+# Recommended: install via npm
+pi install npm:@betterlmy/pi-auto-compact
+
+# Or install directly from GitHub repository
 pi install git:github.com/betterlmy/pi-auto-compact
 ```
 
