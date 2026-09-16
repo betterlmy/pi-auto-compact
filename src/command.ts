@@ -15,10 +15,18 @@ function isThresholdInRange(value: number): boolean {
   return !Number.isNaN(value) && value >= MIN_THRESHOLD && value <= MAX_THRESHOLD;
 }
 
-function applyThreshold(state: ExtensionState, value: number): void {
+/** 只接受纯十进制整数字符串，拒绝 "80abc" 之类的宽松解析 */
+function parseThresholdInput(raw: string): number | null {
+  if (!/^\d+$/.test(raw)) return null;
+  const num = Number.parseInt(raw, 10);
+  return isThresholdInRange(num) ? num : null;
+}
+
+/** 应用新阈值并持久化；返回配置是否成功写入磁盘 */
+function applyThreshold(state: ExtensionState, value: number): boolean {
   state.config.threshold = value;
-  saveConfig(state.config);
   state.lastCheckedPercent = null;
+  return saveConfig(state.config);
 }
 
 /** /auto-compact 命令：查看状态、切换 Footer、配置阈值或原生安全网。 */
@@ -47,8 +55,14 @@ export async function handleAutoCompactCommand(
       const ok = applyNativeSafetyNet();
       if (ok) {
         state.config.autoManageSettings = true;
-        saveConfig(state.config);
-        ctx.ui.notify("已优化原生安全网配置并开启自动守护，重启或 /reload 后生效。", "info");
+        if (saveConfig(state.config)) {
+          ctx.ui.notify("已优化原生安全网配置并开启自动守护，重启或 /reload 后生效。", "info");
+        } else {
+          ctx.ui.notify(
+            "原生安全网已配置，但自动守护开关写入配置失败，重启后需重新执行 /auto-compact setup。",
+            "warning"
+          );
+        }
       } else {
         ctx.ui.notify("写入 settings.json 失败（文件格式损坏或权限不足），未做任何修改。", "error");
       }
@@ -59,7 +73,7 @@ export async function handleAutoCompactCommand(
   // 子命令：/auto-compact footer
   if (trimmed === "footer") {
     state.config.customFooter = !state.config.customFooter;
-    saveConfig(state.config);
+    const persisted = saveConfig(state.config);
     if (state.config.customFooter) {
       ctx.ui.setStatus("auto-compact", undefined); // 清理 setStatus
     } else {
@@ -67,26 +81,28 @@ export async function handleAutoCompactCommand(
       state.footerRegistered = false;
     }
     updateStatusDisplay(state, ctx);
+    const base = state.config.customFooter
+      ? "已开启接管式内联 Footer 样式 (auto:XX%)。"
+      : "已切换为标准非侵入式 Footer 状态行。";
     ctx.ui.notify(
-      state.config.customFooter
-        ? "已开启接管式内联 Footer 样式 (auto:XX%)。"
-        : "已切换为标准非侵入式 Footer 状态行。",
-      "info"
+      persisted ? base : `${base}（写入配置失败，重启后将恢复原模式）`,
+      persisted ? "info" : "warning"
     );
     return;
   }
 
   // 子命令：/auto-compact progress
   if (trimmed === "progress") {
-    state.config.progressColor = state.config.progressColor === false;
-    saveConfig(state.config);
+    state.config.progressColor = !state.config.progressColor;
+    const persisted = saveConfig(state.config);
     updateStatusDisplay(state, ctx);
     if (ctx.hasUI) {
+      const base = state.config.progressColor
+        ? "已开启进度渐变配色（绿→黄→红，按「用量/阈值」取色）。"
+        : "已关闭进度渐变配色，回退三档语义色（>90% 红 / >70% 黄 / 其余蓝）。";
       ctx.ui.notify(
-        state.config.progressColor
-          ? "已开启进度渐变配色（绿→黄→红，按「用量/阈值」取色）。"
-          : "已关闭进度渐变配色，回退三档语义色（>90% 红 / >70% 黄 / 其余蓝）。",
-        "info"
+        persisted ? base : `${base}（写入配置失败，重启后将恢复原配色）`,
+        persisted ? "info" : "warning"
       );
     }
     return;
@@ -106,17 +122,22 @@ export async function handleAutoCompactCommand(
 
   // 带数值设置：/auto-compact 80
   if (trimmed) {
-    const num = Number.parseInt(trimmed, 10);
-    if (!isThresholdInRange(num)) {
+    const num = parseThresholdInput(trimmed);
+    if (num === null) {
       if (ctx.hasUI) {
         ctx.ui.notify(`阈值必须是 ${MIN_THRESHOLD} 到 ${MAX_THRESHOLD} 之间的整数百分比`, "error");
       }
       return;
     }
-    applyThreshold(state, num);
+    const persisted = applyThreshold(state, num);
     updateStatusDisplay(state, ctx);
     if (ctx.hasUI) {
-      ctx.ui.notify(`自动压缩阈值已设置为 ${num}%`, "info");
+      ctx.ui.notify(
+        persisted
+          ? `自动压缩阈值已设置为 ${num}%`
+          : `阈值已在当前会话生效（${num}%），但写入配置失败，重启后将恢复原阈值`,
+        persisted ? "info" : "warning"
+      );
     }
     return;
   }
@@ -129,13 +150,18 @@ export async function handleAutoCompactCommand(
   );
 
   if (input === undefined) return;
-  const val = Number.parseInt(input.trim(), 10);
-  if (!isThresholdInRange(val)) {
+  const val = parseThresholdInput(input.trim());
+  if (val === null) {
     ctx.ui.notify(`阈值必须是 ${MIN_THRESHOLD} 到 ${MAX_THRESHOLD} 之间的整数百分比`, "error");
     return;
   }
 
-  applyThreshold(state, val);
+  const persisted = applyThreshold(state, val);
   updateStatusDisplay(state, ctx);
-  ctx.ui.notify(`自动压缩阈值已设置为 ${val}%`, "info");
+  ctx.ui.notify(
+    persisted
+      ? `自动压缩阈值已设置为 ${val}%`
+      : `阈值已在当前会话生效（${val}%），但写入配置失败，重启后将恢复原阈值`,
+    persisted ? "info" : "warning"
+  );
 }

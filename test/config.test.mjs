@@ -44,6 +44,11 @@ describe("config.ts: 配置与原生安全网管理", () => {
     assert.equal(loaded.progressColor, false);
   });
 
+  it("saveConfig 写入失败时返回 false，不静默吞掉", () => {
+    // 以目录作为目标路径触发 EISDIR，模拟磁盘/权限类写入失败
+    assert.equal(saveConfig({ threshold: 80 }, tempDir), false);
+  });
+
   it("checkNativeSafetyNet 能正确识别非最优的原生配置状态", () => {
     writeFileSync(testSettingsPath, JSON.stringify({ compaction: { enabled: false } }, null, 2));
     const status = checkNativeSafetyNet(testSettingsPath);

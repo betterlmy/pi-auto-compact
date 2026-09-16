@@ -13,7 +13,7 @@ export function runContextGuard(pi: ExtensionAPI, ctx: ExtensionContext, summary
     // 检查任务目标
     if (facts.goalText) {
       const shortGoal = facts.goalText.slice(0, 15);
-      if (!summary.includes(shortGoal) && !summary.toLowerCase().includes(shortGoal.toLowerCase())) {
+      if (!summary.toLowerCase().includes(shortGoal.toLowerCase())) {
         missingItems.push(`当前未完成任务目标: ${facts.goalText}`);
       }
     }

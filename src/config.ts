@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -87,11 +87,23 @@ export function loadConfig(customConfigPath = CONFIG_PATH): AutoCompactConfig {
   };
 }
 
-export function saveConfig(config: AutoCompactConfig, customConfigPath = CONFIG_PATH): void {
+/**
+ * 原子写入 JSON：先写同目录临时文件再 rename，避免进程崩溃留下写了一半的配置文件。
+ * 同目录保证与目标文件处于同一文件系统，rename 具备原子性。
+ */
+function atomicWriteJson(filePath: string, value: unknown): void {
+  const tmpPath = `${filePath}.tmp-${process.pid}`;
+  writeFileSync(tmpPath, JSON.stringify(value, null, 2), "utf-8");
+  renameSync(tmpPath, filePath);
+}
+
+export function saveConfig(config: AutoCompactConfig, customConfigPath = CONFIG_PATH): boolean {
   try {
-    writeFileSync(customConfigPath, JSON.stringify(config, null, 2), "utf-8");
+    atomicWriteJson(customConfigPath, config);
+    return true;
   } catch (error) {
     console.error("[Auto Compact] Failed to save config:", error);
+    return false;
   }
 }
 
@@ -154,7 +166,7 @@ export function applyNativeSafetyNet(customSettingsPath = SETTINGS_PATH): boolea
     const compaction = settings.compaction ?? {};
     settings.compaction = { ...compaction, enabled: true, reserveTokens: NATIVE_RESERVE_TOKENS };
     mkdirSync(dirname(customSettingsPath), { recursive: true });
-    writeFileSync(customSettingsPath, JSON.stringify(settings, null, 2), "utf-8");
+    atomicWriteJson(customSettingsPath, settings);
     return true;
   } catch (error) {
     console.error("[Auto Compact] Failed to apply native safety net:", error);

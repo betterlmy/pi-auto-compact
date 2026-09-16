@@ -442,4 +442,23 @@ describe("index.ts: 扩展核心集成测试", () => {
     assert.ok(statusMsg.includes("自动压缩: 4 次"), "必须展示恢复的历史统计");
     assert.ok(statusMsg.includes("紧急熔断: 2 次"));
   });
+
+  it("16. /auto-compact 拒绝宽松解析的阈值输入，合法输入生效并持久化", async () => {
+    const pi = createMockPi();
+    extensionFactory(pi);
+
+    const cmd = pi._getCommand("auto-compact");
+    const ctx = createMockCtx();
+
+    await cmd.handler("80abc", ctx);
+    assert.ok(
+      ctx._notifications.some((n) => n.type === "error" && n.msg.includes("阈值必须是")),
+      "80abc 不得被宽松解析为 80"
+    );
+
+    await cmd.handler("80", ctx);
+    assert.ok(ctx._notifications.some((n) => n.msg.includes("自动压缩阈值已设置为 80%")));
+    const saved = JSON.parse(readFileSync(join(piAgentDir, "auto-compact.json"), "utf-8"));
+    assert.equal(saved.threshold, 80, "合法输入必须持久化到配置文件");
+  });
 });

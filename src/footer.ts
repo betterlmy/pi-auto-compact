@@ -124,11 +124,9 @@ export function buildCustomFooterComponent(
 
         const contextUsage = ctx.getContextUsage?.();
         const contextWindow = contextUsage?.contextWindow ?? ctx.model?.contextWindow ?? 0;
+        const percentKnown = contextUsage?.percent !== null && contextUsage?.percent !== undefined;
         const contextPercentValue = contextUsage?.percent ?? 0;
-        const contextPercent =
-          contextUsage?.percent !== null && contextUsage?.percent !== undefined
-            ? contextPercentValue.toFixed(1)
-            : "?";
+        const contextPercent = percentKnown ? contextPercentValue.toFixed(1) : "?";
 
         // 内联显示：压缩中显示 (auto:compacting...)，平时显示 (auto:XX%)
         const autoIndicator = isCompacting ? " (auto:compacting...)" : ` (auto:${config.threshold}%)`;
@@ -141,7 +139,10 @@ export function buildCustomFooterComponent(
         // 关闭时回退三档语义色（与 pi 原生 footer 的 90/70 分界一致，低用量补 mdLink 蓝）。
         // contextPercentDisplay 是 statsLeft 的最后一段，彩色重置码不会破坏外层 dim 包装。
         let contextPercentStr: string;
-        if (config.progressColor !== false) {
+        if (!percentKnown) {
+          // 用量未知时显示 "?"，配色同步降级为 dim，避免按 0% 误染绿色
+          contextPercentStr = theme.fg("dim", contextPercentDisplay);
+        } else if (config.progressColor !== false) {
           const ratio = progressRatio(contextPercentValue, config.threshold);
           const trueColor = getCapabilities().trueColor;
           contextPercentStr = colorizeProgress(contextPercentDisplay, ratio, trueColor);

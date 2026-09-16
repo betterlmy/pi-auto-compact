@@ -64,15 +64,8 @@ export function truncateToolResultContent(content: unknown, maxChars: number): C
     return { ...block, text: truncated };
   });
 
-  // 逐块均摊后仍可能整体超限（块数多、每块略超），再做一次整体收紧
-  if (modified && textLength(result) > maxChars) {
-    const tightLimit = Math.max(1, Math.floor(maxChars / Math.max(1, result.length)));
-    return result.map((block) => {
-      if (!isTextBlock(block)) return block;
-      const t = truncateText(block.text, tightLimit);
-      return t === null ? block : { ...block, text: t };
-    });
-  }
-
+  // 边界说明：maxChars 小于文本块数时 perBlockLimit 被兜底为 1，总和可能略超上限。
+  // 此时优先保留块结构（每块至少 1 字符），不做进一步收紧——
+  // 整体再压一遍得到的预算同样是 1，属于无效操作。
   return modified ? result : null;
 }

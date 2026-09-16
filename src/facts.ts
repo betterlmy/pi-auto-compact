@@ -19,7 +19,7 @@ export const MAX_RECENT_COMMANDS = 8;
  * 确定性事实提取器：从会话历史中提取修改的文件、查阅的文件与关键执行命令
  * 避免总结模型因上下文过大而遗忘精确路径或产生幻觉。
  */
-export function extractSessionFacts(sessionManager: { getEntries(): any[] }): SessionFacts {
+export function extractSessionFacts(sessionManager?: { getEntries(): any[] } | null): SessionFacts {
   // 按触碰顺序记录修改文件，重复出现时移到末尾，保证截断后保留最近改动的文件
   const modifiedOrder: string[] = [];
   const modifiedSet = new Set<string>();
