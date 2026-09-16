@@ -1,4 +1,4 @@
-import { CUSTOM_INSTRUCTIONS } from "./config.ts";
+import { CUSTOM_INSTRUCTIONS, EMERGENCY_INSTRUCTIONS } from "./config.ts";
 
 export interface SessionFacts {
   modifiedFiles: string[];
@@ -6,6 +6,9 @@ export interface SessionFacts {
   recentCommands: string[];
   goalText?: string;
 }
+
+/** 压缩触发场景：settled = Agent 空闲沉淀；emergency = 工具暴涨中途熔断并续跑 */
+export type TriggerScenario = "settled" | "emergency";
 
 /** 注入压缩提示词的各类事实上限，避免长会话反向放大待压缩上下文 */
 export const MAX_MODIFIED_FILES = 30;
@@ -108,8 +111,17 @@ export function extractSessionFacts(sessionManager: { getEntries(): any[] }): Se
 /**
  * 组装携带确定性事实底座的压缩提示词
  */
-export function buildCompactionInstructions(facts: SessionFacts, baseInstructions = CUSTOM_INSTRUCTIONS): string {
+export function buildCompactionInstructions(
+  facts: SessionFacts,
+  baseInstructions = CUSTOM_INSTRUCTIONS,
+  triggerScenario?: TriggerScenario
+): string {
   const sections: string[] = [baseInstructions];
+
+  // 紧急熔断场景：工具暴涨把正常工作拦腰截断，必须额外保全断点上下文才能无缝续跑
+  if (triggerScenario === "emergency") {
+    sections.push(EMERGENCY_INSTRUCTIONS);
+  }
   const factsLines: string[] = [];
 
   if (facts.goalText) {

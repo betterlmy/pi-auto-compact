@@ -2,12 +2,7 @@
 
 # @betterlmy/pi-auto-compact
 
-**Deterministic, context-guarded automatic compaction extension for the Pi Coding Agent with dual watermarks and inline status display.**
-
-[![npm version](https://img.shields.io/npm/v/@betterlmy/pi-auto-compact.svg)](https://www.npmjs.com/package/@betterlmy/pi-auto-compact)
-[![Pi Extension](https://img.shields.io/badge/Pi-Extension-blue.svg)](https://pi.dev)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![CI](https://github.com/betterlmy/pi-auto-compact/actions/workflows/ci.yml/badge.svg)](https://github.com/betterlmy/pi-auto-compact/actions)
+**Automatic context management for the Pi coding agent: long conversations without interruptions or lost details.**
 
 **English** | [简体中文](./README.zh-CN.md)
 
@@ -15,115 +10,127 @@
 
 ---
 
-## Why This Exists
+## What problem does this solve?
 
-Pi's built-in auto-compaction relies solely on a fixed absolute token reserve (`compaction.reserveTokens`, defaulting to 16,384 tokens). On modern models with 1M or 2M token windows, this triggers at an extreme **98.4%+**, leading to:
-1. **Mid-task interruption**: Compaction arbitrarily interrupting long tool loops;
-2. **Context degradation**: Summarization LLMs forgetting exact modified file paths, critical commands, and strict project constraints;
-3. **Session amnesia**: Losing the initial task objective or safety redlines after multiple compaction cycles;
-4. **Configuration complexity**: Existing community packages often require complex multi-file configurations and obscure parameters.
+Two concepts first:
 
-`pi-auto-compact` resolves these pain points with **one-command configuration** and **deterministic fact anchoring**.
+**Context**: everything the AI can "see" while working on a task — your requests, its replies, commands it ran, and their output. Context has a size limit; once it's full, nothing new fits.
 
----
+**Compaction**: when the context nears its limit, earlier content is condensed into a shorter summary to free up space.
 
-## Key Features
+Pi has built-in compaction, but by default it triggers very late (around 98% usage), which causes two common problems:
 
-### 1. Dual-Watermark Compaction Trigger
+1. **Interrupted work**: compaction often happens in the middle of a task;
+2. **Lossy summaries**: the summary can drop file paths you edited, commands you ran, or the current task goal.
 
-```text
-               [100% Context Window]
-                         ↑
-        95% Native reserveTokens emergency fallback (safety net)
-                         ↑
-   ───▶ 92% Emergency Ceiling (instant compaction on sudden tool blowout + auto-resume)
-                         ↑
-   ───▶ 75% Gentle Compaction (runs only at agent_settled idle point)
-```
+This plugin manages both when compaction happens and what it preserves, avoiding these problems.
 
-- **Gentle Compaction (Default: 75%)**: Level-triggered — it fires whenever the agent run has fully settled (`agent_settled`), the session is idle, and usage is at or above the threshold (no rising edge required). After a failed attempt it waits for usage to grow before retrying, so it never busy-loops at the same watermark. Never cuts in the middle of active tool execution.
-- **Emergency Ceiling (92%)**: If a single tool call (e.g. huge build log, massive diff) blows context usage past 92%, it halts on the spot, compacts with full fact preservation, and automatically resumes the turn.
+## What changes after installing?
 
-### 2. Deterministic Fact Extraction (Inspired by `pi-smart-compact`)
-Before delegating summarization to the LLM, the extension deterministically inspects the session history:
-- **Modified files**: Extracts exact paths for all `edit` and `write` tool calls;
-- **Inspected files**: Collects key files examined with `read` (deduplicating against modified files);
-- **Executed commands**: Records recent `bash` command invocations;
-- **Task Objective**: Identifies active `/goal <objective>` contracts.
+### 1. Compacts early, without interrupting work
 
-These facts are injected directly into compaction instructions as a **ground-truth foundation**, eliminating hallucinations and forgotten file paths.
+- When context usage reaches **75%** (the default, adjustable), the plugin compacts during a natural pause — the moment the AI finishes its current step.
+- If a single operation (say, reading a very large log file) pushes usage past **92%** instantly, the plugin compacts right away and automatically resumes the interrupted task afterward.
 
-### 3. Context Guard: Post-Compaction Automatic Rescue (Inspired by `agent-context-guard-pi`)
-Immediately after compaction finishes (`session_compact`):
-- Verifies whether the resulting summary retained the active goal and modified file paths;
-- If any critical fact was omitted by the LLM, it silently injects a recovery anchor message (`display: false`, no UI pollution):
-  ```text
-  [Context Guard: Restoring Critical Invariants]
-  - Active goal: ...
-  - Modified files: ...
-  ```
-- Ensures the next turn starts with an uncompromised state foundation.
+### 2. Extracts key facts before compacting, so summaries stay complete
 
-### 4. Dual Footer Modes (Non-Invasive vs Inline Takeover)
-- **Default Mode (Non-Invasive)**: Uses `ctx.ui.setStatus` to display `compact: 75%`, fully compatible with native footers, `pi-starship`, and `@henryqw/pi-footer`.
-- **Inline Mode (Optional)**: Run `/auto-compact footer` to toggle inline footer rendering, seamlessly blending into the native token stats line:
-  ```text
-  ↑1.9M ↓15k R7.8M CH96.4% $2.574 14.1%/1.0M (auto:75%)
-  ```
-  Dynamically transitions to `(auto:compacting...)` while compaction is in progress.
+Before compacting, the plugin pulls the following directly from the conversation history and hands it to the AI along with the summary request:
+
+- Files modified (exact paths)
+- Files read
+- Commands executed
+- The current task goal
+
+This information comes from checking the raw history entry by entry — it does not rely on the AI's memory, so summaries are far less likely to get things wrong.
+
+### 3. Verifies after compacting, restores what's missing
+
+Once the summary is generated, the plugin checks whether all of the above made it in. If something was dropped, the plugin quietly adds the missing content back into the conversation — nothing shows up on screen. The next step starts from complete information.
+
+### 4. Trims oversized outputs before they enter the context
+
+If one command's output is hundreds of thousands of characters, the plugin trims the middle before it enters the context — keeping the beginning and end, with a note of how many characters were omitted. In most cases usage never reaches 92%, so emergency compaction rarely happens at all.
+
+### 5. Session statistics
+
+How many times this session compacted, trimmed outputs, or handled an emergency — all recorded. Quit Pi and resume later; the records survive. Check them anytime with `/auto-compact status`.
+
+### 6. Two status bar styles
+
+- **Default**: the status bar shows `compact: 75%`, staying out of the way and remaining compatible with UI-appearance plugins.
+- **Takeover**: run `/auto-compact footer` and the usage info merges into the end of Pi's native stats line as `14.1%/1.0M (auto:75%)`; while compacting it shows `(auto:compacting...)`.
 
 ---
 
 ## Installation
 
-Install using Pi's built-in package manager:
+Run either command in your terminal, then restart Pi (or run `/reload`):
 
 ```bash
-# Recommended: install via npm
+# Install from npm (recommended)
 pi install npm:@betterlmy/pi-auto-compact
 
-# Or install directly from GitHub repository
+# Or install from GitHub
 pi install git:github.com/betterlmy/pi-auto-compact
 ```
 
+Works with default settings — no configuration needed.
+
 ---
 
-## Commands
+## Handy Commands
 
-| Command | Description |
+| Command | What it does |
 | :--- | :--- |
-| `/auto-compact <number>` | Set the compaction threshold percentage (10–99, e.g. `/auto-compact 80`) |
-| `/auto-compact` | Open an interactive dialog to set the threshold |
-| `/auto-compact footer` | Toggle between standard status line and inline takeover footer |
-| `/auto-compact setup` | Safely verify and optimize Pi's native safety net (`reserveTokens=50000`) |
-| `/auto-compact status` | Display current threshold, emergency ceiling, usage, and toggle states |
+| `/auto-compact 80` | Move the auto-compaction trigger line to 80% |
+| `/auto-compact` | Open a dialog to adjust the trigger line |
+| `/auto-compact footer` | Switch status bar style |
+| `/auto-compact status` | View current settings and session statistics |
+| `/auto-compact setup` | (Optional) Adjust Pi's built-in fallback compaction settings to recommended values |
 
 ---
 
-## Configuration
+## Configuration (Optional)
 
-Stored at `~/.pi/agent/auto-compact.json`:
+Settings live in `~/.pi/agent/auto-compact.json`:
 
 ```json
 {
   "threshold": 75,
   "customFooter": false,
-  "autoManageSettings": false
+  "autoManageSettings": false,
+  "maxToolResultChars": 50000
 }
 ```
 
-- `threshold` (`number`): Gentle compaction trigger threshold (10–99, default `75`).
-- `customFooter` (`boolean`): Whether to enable inline `(auto:XX%)` footer takeover (default `false`).
-- `autoManageSettings` (`boolean`): Automatically enforce the native 95% safety net in `settings.json` on startup (default `false`).
+- `threshold`: the auto-compaction trigger line as a percentage of context usage (default 75). Lower = compacts more often, more relaxed; higher = fewer interruptions but more likely to hit emergency compaction.
+- `customFooter`: whether to use the takeover status bar (default off).
+- `autoManageSettings`: whether the plugin may adjust Pi's built-in fallback compaction settings for you (default off).
+- `maxToolResultChars`: the character limit for a single output before it enters the context; anything beyond is trimmed (default 50000; set 0 to disable).
 
 ---
 
-## Testing
+## FAQ
 
-Run the test suite (powered by Node.js built-in `node:test`, 13 tests):
+**Do I need to know how to code?**
+No. Install and restart Pi — the defaults just work.
+
+**Does it touch my files?**
+No. The plugin only works with the conversation history itself; it never reads or writes your project files.
+
+**When does it compact?**
+Two situations: usage reaches 75% while the AI happens to be between steps, or a single operation pushes usage past 92% instantly. Otherwise it stays out of the way.
+
+**Does compacting cost extra?**
+Compaction is one AI call (reading the earlier content and writing a summary) — about the same cost as an ordinary chat. The default 75% trigger line exists precisely to pick a good moment for it.
+
+---
+
+## For Developers
 
 ```bash
-npm test
+npm test           # run tests
+npm run typecheck  # type check
 ```
 
 ---
@@ -131,4 +138,4 @@ npm test
 ## License
 
 [MIT](LICENSE) © betterlmy
-Special thanks to the design inspirations from `pi-smart-compact` (alpertarhan) and `agent-context-guard-pi` (j1nn0).
+Design inspiration from `pi-smart-compact` (alpertarhan) and `agent-context-guard-pi` (j1nn0).

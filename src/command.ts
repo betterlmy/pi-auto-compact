@@ -7,6 +7,7 @@ import {
   MIN_THRESHOLD,
   saveConfig,
 } from "./config.ts";
+import { formatStats } from "./stats.ts";
 import { updateStatusDisplay } from "./status.ts";
 import type { ExtensionState } from "./state.ts";
 
@@ -79,8 +80,9 @@ export async function handleAutoCompactCommand(
   if (trimmed === "status") {
     const usage = ctx.getContextUsage?.();
     const cur = usage?.percent !== null && usage?.percent !== undefined ? `${usage.percent.toFixed(1)}%` : "未知";
+    const truncateLimit = state.config.maxToolResultChars ?? 0;
     ctx.ui.notify(
-      `[Auto Compact 状态]\n- 当前阈值: ${state.config.threshold}%\n- 紧急熔断线: ${EMERGENCY_THRESHOLD}%\n- 当前上下文用量: ${cur}\n- 内联 Footer: ${state.config.customFooter ? "开启" : "关闭"}\n- 自动守护设置: ${state.config.autoManageSettings ? "开启" : "关闭"}`,
+      `[Auto Compact 状态]\n- 当前阈值: ${state.config.threshold}%\n- 紧急熔断线: ${EMERGENCY_THRESHOLD}%\n- 当前上下文用量: ${cur}\n- 工具结果截断上限: ${truncateLimit > 0 ? `${truncateLimit} 字符` : "禁用"}\n- 内联 Footer: ${state.config.customFooter ? "开启" : "关闭"}\n- 自动守护设置: ${state.config.autoManageSettings ? "开启" : "关闭"}\n\n【会话统计】\n${formatStats(state.stats)}`,
       "info"
     );
     return;

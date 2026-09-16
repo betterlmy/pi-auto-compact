@@ -4,7 +4,9 @@ import { executeCompaction } from "./compaction.ts";
 import { applyNativeSafetyNet, checkNativeSafetyNet, EMERGENCY_THRESHOLD } from "./config.ts";
 import { runContextGuard } from "./guard.ts";
 import { createExtensionState } from "./state.ts";
+import { recordStats, restoreStats } from "./stats.ts";
 import { updateStatusDisplay } from "./status.ts";
+import { truncateToolResultContent } from "./truncate.ts";
 
 export { extractSessionFacts, buildCompactionInstructions } from "./facts.ts";
 export { loadConfig, saveConfig, checkNativeSafetyNet, applyNativeSafetyNet } from "./config.ts";
@@ -32,7 +34,17 @@ export default function (pi: ExtensionAPI) {
     state.requestRenderFn?.();
   });
 
-  // 2. 压缩落地后守护检查：防止模型总结丢失重要文件或目标
+  // 2. 工具结果入上下文前的预防性截断：超大输出首尾保留，避免单次工具调用
+  //    直接把用量冲过熔断线（从源头降低紧急熔断发生概率）
+  pi.on("tool_result", (event) => {
+    const maxChars = state.config.maxToolResultChars ?? 0;
+    const truncated = truncateToolResultContent(event.content, maxChars);
+    if (truncated === null) return;
+    recordStats(pi, state.stats, { truncations: state.stats.truncations + 1 });
+    return { content: truncated as unknown as typeof event.content };
+  });
+
+  // 3. 压缩落地后守护检查：防止模型总结丢失重要文件或目标
   pi.on("session_compact", (event, ctx) => {
     state.isCompacting = false;
     state.lastCheckedPercent = null;
@@ -47,8 +59,10 @@ export default function (pi: ExtensionAPI) {
     updateStatusDisplay(state, ctx);
   });
 
-  // 3. 会话启动
+  // 4. 会话启动：恢复持久化统计（跨 resume 保留），再处理安全网
   pi.on("session_start", (_event, ctx) => {
+    state.stats = restoreStats(ctx.sessionManager?.getEntries?.() || []);
+
     // 自动或非侵入检测原生安全网
     if (state.config.autoManageSettings) {
       // 已处于最优时不再重复改写 settings.json
@@ -67,7 +81,7 @@ export default function (pi: ExtensionAPI) {
     updateStatusDisplay(state, ctx);
   });
 
-  // 4. 常态压缩触发点：Agent 完全沉淀空闲后（agent_settled）
+  // 5. 常态压缩触发点：Agent 完全沉淀空闲后（agent_settled）
   pi.on("agent_settled", (_event, ctx) => {
     // 自愈：agent_settled 的语义保证此刻没有压缩/重试/续跑待执行，
     // 若本地仍标记压缩中，说明是陈旧状态（例如 SDK 成功路径未发出 session_compact），
@@ -92,7 +106,7 @@ export default function (pi: ExtensionAPI) {
     executeCompaction(pi, state, ctx, currentPercent, false, "settled");
   });
 
-  // 5. 紧急熔断触发点：多轮工具中途暴涨保护（>= 92%）
+  // 6. 紧急熔断触发点：多轮工具中途暴涨保护（>= 92%）
   pi.on("turn_end", (event, ctx) => {
     if (state.isCompacting) return;
     if (!hasToolCall(event.message)) return;
@@ -105,7 +119,7 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // 6. 注册 /auto-compact 命令
+  // 7. 注册 /auto-compact 命令
   pi.registerCommand("auto-compact", {
     description: "查看或配置自动压缩 (用法: /auto-compact [数值|setup|footer|status])",
     handler: (args, ctx) => handleAutoCompactCommand(state, args, ctx),

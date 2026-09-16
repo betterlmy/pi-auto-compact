@@ -1,10 +1,11 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { EMERGENCY_THRESHOLD } from "./config.ts";
-import { buildCompactionInstructions, extractSessionFacts } from "./facts.ts";
+import { buildCompactionInstructions, extractSessionFacts, type TriggerScenario } from "./facts.ts";
+import { recordStats } from "./stats.ts";
 import { updateStatusDisplay } from "./status.ts";
 import type { ExtensionState } from "./state.ts";
 
-export type TriggerReason = "settled" | "emergency";
+export type TriggerReason = TriggerScenario;
 
 /**
  * 统一压缩执行器（支持沉淀后静默压缩 与 中途暴涨紧急熔断并续跑）。
@@ -35,13 +36,18 @@ export function executeCompaction(
   // 否则 isCompacting 永久为 true，后续所有触发点都会被开头的守卫挡死。
   try {
     const facts = extractSessionFacts(ctx.sessionManager);
-    const instructions = buildCompactionInstructions(facts);
+    // 触发场景差异化：紧急熔断需额外保全断点信息才能无缝续跑
+    const instructions = buildCompactionInstructions(facts, undefined, triggerReason);
 
     ctx.compact({
       customInstructions: instructions,
       onComplete: () => {
         state.isCompacting = false;
         state.lastCheckedPercent = null;
+        recordStats(pi, state.stats, {
+          compactions: state.stats.compactions + 1,
+          emergencies: triggerReason === "emergency" ? state.stats.emergencies + 1 : state.stats.emergencies,
+        }, { markCompactionTime: true });
         updateStatusDisplay(state, ctx);
         if (ctx.hasUI) {
           ctx.ui.notify("[Auto Compact] 压缩完成，已释放上下文空间", "info");

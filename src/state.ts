@@ -1,4 +1,5 @@
 import { loadConfig, type AutoCompactConfig } from "./config.ts";
+import { emptyStats, type CompactionStats } from "./stats.ts";
 
 /**
  * 扩展运行期的可变状态。
@@ -14,6 +15,8 @@ export interface ExtensionState {
   requestRenderFn?: () => void;
   /** 是否已注册接管式自定义 Footer */
   footerRegistered: boolean;
+  /** 会话内压缩/截断统计（appendEntry 持久化，resume 后恢复） */
+  stats: CompactionStats;
 }
 
 export function createExtensionState(): ExtensionState {
@@ -22,5 +25,6 @@ export function createExtensionState(): ExtensionState {
     isCompacting: false,
     lastCheckedPercent: null,
     footerRegistered: false,
+    stats: emptyStats(),
   };
 }

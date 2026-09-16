@@ -10,12 +10,29 @@ export const MIN_THRESHOLD = 10;
 export const MAX_THRESHOLD = 99;
 export const EMERGENCY_THRESHOLD = 92; // 紧急熔断天花板：中途突发暴涨时就地压缩并续跑
 export const NATIVE_RESERVE_TOKENS = 50000; // 原生安全网触发线（1M 窗口下约 95%）
+export const DEFAULT_MAX_TOOL_RESULT_CHARS = 50000; // 工具结果预防性截断默认上限（字符）
 
 export const CUSTOM_INSTRUCTIONS =
   "总结上下文，重点保留关键任务目标、约束、已完成改动及当前进行中的步骤";
 
+/**
+ * 紧急熔断场景的附加指令：单次工具调用把上下文冲过熔断线后被拦腰截断，
+ * 总结必须额外保全断点信息，续跑回合才能无缝接上。
+ */
+export const EMERGENCY_INSTRUCTIONS = [
+  "【紧急熔断场景附加要求】本次压缩发生在工具执行中途，任务将被强制续跑，除基础事实外必须额外保留：",
+  "- 被中断工具调用的名称、参数与已获得的部分结果（若可见），以及本次工具调用的未完成意图；",
+  "- 中断前最后一步操作的精确状态：已完成的动作、正在进行的动作、下一步计划；",
+  "- 触发本次工具调用的原始用户意图，确保续跑第一回合即可直接恢复执行。",
+].join("\n");
+
 export interface AutoCompactConfig {
   threshold: number;
+  /**
+   * 单个工具结果进入上下文前的字符上限（首尾保留、中部省略）。
+   * 0 表示禁用截断；默认 50000。
+   */
+  maxToolResultChars?: number;
   /**
    * 是否启用接管式自定义 Footer（显示类似 14.1%/1.0M (auto:75%) 的内联效果）
    * 默认 false（使用非侵入式 setStatus，与其他 footer 插件兼容）
@@ -44,12 +61,23 @@ export function loadConfig(customConfigPath = CONFIG_PATH): AutoCompactConfig {
         threshold,
         customFooter: typeof parsed.customFooter === "boolean" ? parsed.customFooter : false,
         autoManageSettings: typeof parsed.autoManageSettings === "boolean" ? parsed.autoManageSettings : false,
+        maxToolResultChars:
+          typeof parsed.maxToolResultChars === "number" &&
+          Number.isFinite(parsed.maxToolResultChars) &&
+          parsed.maxToolResultChars >= 0
+            ? parsed.maxToolResultChars
+            : DEFAULT_MAX_TOOL_RESULT_CHARS,
       };
     }
   } catch {
     // 忽略读取错误，使用默认值
   }
-  return { threshold: DEFAULT_THRESHOLD, customFooter: false, autoManageSettings: false };
+  return {
+    threshold: DEFAULT_THRESHOLD,
+    customFooter: false,
+    autoManageSettings: false,
+    maxToolResultChars: DEFAULT_MAX_TOOL_RESULT_CHARS,
+  };
 }
 
 export function saveConfig(config: AutoCompactConfig, customConfigPath = CONFIG_PATH): void {

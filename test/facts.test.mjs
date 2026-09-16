@@ -75,6 +75,18 @@ describe("facts.ts: 确定性事实提取器", () => {
     assert.ok(!facts.modifiedFiles.includes("src/f0.ts"), "最早的文件应被截断");
   });
 
+  it("emergency 场景追加断点保全指令段，settled 场景不追加", () => {
+    const facts = extractSessionFacts({ getEntries: () => [] });
+
+    const settledPrompt = buildCompactionInstructions(facts, undefined, "settled");
+    assert.ok(!settledPrompt.includes("紧急熔断场景"), "settled 场景不得携带熔断附加指令");
+
+    const emergencyPrompt = buildCompactionInstructions(facts, undefined, "emergency");
+    assert.ok(emergencyPrompt.includes("紧急熔断场景"));
+    assert.ok(emergencyPrompt.includes("被中断工具调用"));
+    assert.ok(emergencyPrompt.includes("原始用户意图"));
+  });
+
   it("重复修改的文件按最近一次触碰排序，截断时保留", () => {
     const content = [{ type: "toolCall", name: "edit", arguments: { path: "src/old.ts" } }];
     for (let i = 0; i < 35; i++) {

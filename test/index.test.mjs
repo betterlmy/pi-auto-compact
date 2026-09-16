@@ -11,6 +11,7 @@ function createMockPi() {
   const handlers = new Map();
   const commands = new Map();
   const sentMessages = [];
+  const appendedEntries = [];
 
   const pi = {
     on: (event, handler) => {
@@ -23,9 +24,13 @@ function createMockPi() {
     sendMessage: (msg, opts) => {
       sentMessages.push({ msg, opts });
     },
+    appendEntry: (type, data) => {
+      appendedEntries.push({ type, data });
+    },
     _getHandler: (event) => handlers.get(event)?.[0],
     _getCommand: (name) => commands.get(name),
     _getSentMessages: () => sentMessages,
+    _getAppendedEntries: () => appendedEntries,
   };
   return pi;
 }
@@ -133,6 +138,7 @@ describe("index.ts: 扩展核心集成测试", () => {
     assert.ok(pi._getHandler("session_before_compact"));
     assert.ok(pi._getHandler("session_compact"));
     assert.ok(pi._getHandler("session_compact_failed"));
+    assert.ok(pi._getHandler("tool_result"), "必须注册预防性截断钩子");
   });
 
   it("2. 默认模式下使用非侵入式 setStatus 输出，不主动霸占 setFooter", () => {
@@ -372,5 +378,68 @@ describe("index.ts: 扩展核心集成测试", () => {
 
     const sent = pi._getSentMessages();
     assert.ok(sent.some((s) => s.msg.customType === "auto-compact/resume"), "非空闲时不得静默丢弃续跑消息");
+  });
+
+  it("13. tool_result 超限截断：大输出首尾保留并计数，正常输出零拷贝放行", () => {
+    const pi = createMockPi();
+    extensionFactory(pi);
+
+    const onToolResult = pi._getHandler("tool_result");
+
+    // 正常输出：不修改、不计数
+    const small = [{ type: "text", text: "ok" }];
+    const r1 = onToolResult({ type: "tool_result", toolName: "bash", content: small });
+    assert.equal(r1, undefined, "正常输出不得被修改");
+
+    // 超限输出：首尾保留
+    const big = [{ type: "text", text: `HEAD${"x".repeat(99999)}TAIL` }];
+    const r2 = onToolResult({ type: "tool_result", toolName: "bash", content: big });
+    assert.ok(Array.isArray(r2.content), "超限输出必须返回替换内容");
+    assert.ok(r2.content[0].text.startsWith("HEAD"));
+    assert.ok(r2.content[0].text.endsWith("TAIL"));
+    assert.ok(r2.content[0].text.includes("[...truncated"));
+
+    // 截断计数已持久化
+    const entries = pi._getAppendedEntries();
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].data.truncations, 1);
+  });
+
+  it("14. 紧急熔断压缩指令包含断点保全附加段，完成统计持久化", () => {
+    const pi = createMockPi();
+    extensionFactory(pi);
+
+    const onTurnEnd = pi._getHandler("turn_end");
+    const ctx = createMockCtx({ percent: 93, compactBehavior: "sync-complete" });
+    onTurnEnd(
+      { message: { role: "assistant", content: [{ type: "toolCall", name: "read", arguments: { path: "a.log" } }] } },
+      ctx
+    );
+
+    const opts = ctx._getCompactOptions();
+    assert.ok(opts.customInstructions.includes("紧急熔断场景"), "熔断触发必须附带断点保全指令");
+    assert.ok(opts.customInstructions.includes("被中断工具调用"));
+
+    const entries = pi._getAppendedEntries();
+    const statEntry = entries.find((e) => e.data && e.data.compactions === 1);
+    assert.ok(statEntry, "压缩完成后必须持久化统计");
+    assert.equal(statEntry.data.emergencies, 1);
+  });
+
+  it("15. session_start 恢复历史统计，status 命令展示会话统计", async () => {
+    const pi = createMockPi();
+    extensionFactory(pi);
+
+    const historyEntries = [
+      { type: "custom", customType: "auto-compact/stats", data: { compactions: 4, truncations: 9, emergencies: 2 } },
+    ];
+    const ctx = createMockCtx({ entries: historyEntries });
+    pi._getHandler("session_start")({}, ctx);
+
+    const cmd = pi._getCommand("auto-compact");
+    await cmd.handler("status", ctx);
+    const statusMsg = ctx._notifications.at(-1).msg;
+    assert.ok(statusMsg.includes("自动压缩: 4 次"), "必须展示恢复的历史统计");
+    assert.ok(statusMsg.includes("紧急熔断: 2 次"));
   });
 });
