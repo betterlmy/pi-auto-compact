@@ -127,10 +127,10 @@ export default function (pi: ExtensionAPI) {
     if (state.lastCheckedPercent !== null && currentPercent <= state.lastCheckedPercent) return;
 
     state.lastCheckedPercent = currentPercent;
-    executeCompaction(pi, state, ctx, currentPercent, false, "settled");
+    executeCompaction(pi, state, ctx, currentPercent, true, "settled");
   });
 
-  // 6. 紧急熔断触发点：多轮工具中途暴涨保护（>= 92%）
+  // 6. 强制压缩触发点：多轮工具调用中途（turn_end）达到阈值即强制压缩并自动续跑
   pi.on("turn_end", (event, ctx) => {
     if (state.isCompacting) return;
     if (!hasToolCall(event.message)) return;
@@ -138,8 +138,13 @@ export default function (pi: ExtensionAPI) {
     const currentPercent = contextPercent(ctx);
     if (currentPercent === null) return;
 
-    if (currentPercent >= EMERGENCY_THRESHOLD) {
-      executeCompaction(pi, state, ctx, currentPercent, true, "emergency");
+    // 达到设定的阈值即强制压缩并自动续跑；>= 92% 自动提升为紧急熔断保全
+    if (currentPercent >= state.config.threshold) {
+      if (state.lastCheckedPercent !== null && currentPercent <= state.lastCheckedPercent) return;
+      state.lastCheckedPercent = currentPercent;
+
+      const isEmergency = currentPercent >= EMERGENCY_THRESHOLD;
+      executeCompaction(pi, state, ctx, currentPercent, true, isEmergency ? "emergency" : "settled");
     }
   });
 

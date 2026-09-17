@@ -510,4 +510,52 @@ describe("index.ts: 扩展核心集成测试", () => {
     await cmd.handler("status", ctxB);
     assert.ok(ctxB._notifications.at(-1).msg.includes("60% (仅当前会话 / 全局: 70%)"));
   });
+
+  it("18. turn_end 中途达到常规阈值即强制压缩并自动续跑", async () => {
+    const pi = createMockPi();
+    extensionFactory(pi);
+
+    const onTurnEnd = pi._getHandler("turn_end");
+    const toolMsg = {
+      role: "assistant",
+      content: [{ type: "toolCall", name: "read", arguments: { path: "code.ts" } }],
+    };
+
+    // 默认阈值 75%，当前 78%（未达到 92% 紧急线，但已超 75% 阈值）
+    const ctx = createMockCtx({
+      percent: 78,
+      compactBehavior: "sync-complete",
+    });
+
+    onTurnEnd({ message: toolMsg }, ctx);
+    assert.equal(ctx._isCompactCalled(), true, "中途达到常规阈值必须强制触发压缩");
+
+    await new Promise((resolve) => setImmediate(resolve));
+    const sent = pi._getSentMessages();
+    assert.ok(
+      sent.some((s) => s.msg.customType === "auto-compact/resume" && s.opts.triggerTurn === true),
+      "中途常规阈值压缩完成后必须发送续跑消息自动接续任务"
+    );
+  });
+
+  it("19. agent_settled 沉淀压缩完成后同样自动发送续跑消息", async () => {
+    const pi = createMockPi();
+    extensionFactory(pi);
+
+    const onSettled = pi._getHandler("agent_settled");
+    const ctx = createMockCtx({
+      percent: 78,
+      compactBehavior: "sync-complete",
+    });
+
+    onSettled({}, ctx);
+    assert.equal(ctx._isCompactCalled(), true, "沉淀时超阈值必须触发压缩");
+
+    await new Promise((resolve) => setImmediate(resolve));
+    const sent = pi._getSentMessages();
+    assert.ok(
+      sent.some((s) => s.msg.customType === "auto-compact/resume" && s.opts.triggerTurn === true),
+      "沉淀压缩完成后也必须自动续跑，不中断任务等待用户"
+    );
+  });
 });

@@ -50,18 +50,18 @@ export function executeCompaction(
         }, { markCompactionTime: true });
         updateStatusDisplay(state, ctx);
         if (ctx.hasUI) {
-          ctx.ui.notify("[Auto Compact] 压缩完成，已释放上下文空间", "info");
+          ctx.ui.notify("[Auto Compact] 压缩完成，已释放上下文空间，正在自动恢复任务执行...", "info");
         }
 
         if (resumeTask) {
-          // 中途紧急熔断后自动发送续跑消息继续未完成的任务循环。
+          // 自动压缩后发送隐式续跑消息唤醒 Agent 继续执行未完成的任务循环。
           // 不自行判断空闲：sendMessage 在流式进行时会自动转为 steer 排队，
           // 空闲时触发新回合；自行判空闲返回会静默丢弃续跑消息。
           setImmediate(() => {
             pi.sendMessage(
               {
                 customType: "auto-compact/resume",
-                content: "Auto-compact emergency compaction completed. Continue the current task.",
+                content: "Context compaction completed. Continue the current task based on the context summary.",
                 display: false,
               },
               { triggerTurn: true }

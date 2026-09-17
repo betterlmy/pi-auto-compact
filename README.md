@@ -27,10 +27,11 @@ This plugin manages both when compaction happens and what it preserves, avoiding
 
 ## What changes after installing?
 
-### 1. Compacts early, without interrupting work
+### 1. Mandatory compaction at threshold with auto-resume
 
-- When context usage reaches **75%** (the default, adjustable), the plugin compacts during a natural pause — the moment the AI finishes its current step.
-- If a single operation (say, reading a very large log file) pushes usage past **92%** instantly, the plugin compacts right away and automatically resumes the interrupted task afterward.
+- When context usage reaches the configured threshold (default 75%, configurable per-session or globally), the plugin **triggers compaction immediately** (either mid-run after a tool execution or when settled), rather than waiting until the context is blown or idling out.
+- **Seamless auto-resume**: Compaction completes and immediately dispatches an invisible continuation turn to resume the interrupted or ongoing task. No need to manually prompt "continue" — mirroring the fluid experience of Codex and Claude Code.
+- If a single operation pushes usage past **92%** instantly, it escalates to emergency breakpoint preservation, capturing interrupted tool details alongside deterministic facts so the resumed turn picks up without missing a beat.
 
 ### 2. Extracts key facts before compacting, so summaries stay complete
 
