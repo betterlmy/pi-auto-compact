@@ -51,11 +51,18 @@ Once the summary is generated, the plugin checks whether all of the above made i
 
 If one command's output is hundreds of thousands of characters, the plugin trims the middle before it enters the context — keeping the beginning and end, with a note of how many characters were omitted. In most cases usage never reaches 92%, so emergency compaction rarely happens at all.
 
-### 5. Session statistics
+### 5. Safe compaction overflow defense (prevents 400 errors and deadlocks)
+
+In long sessions with reasoning/thinking enabled, native compaction serializes hundreds of thousands of internal thinking characters directly into the summarization prompt, readily triggering `400 ContextWindowExceededError` and deadlocking the session. This extension prevents that:
+- **Strips internal thinking**: Automatically omits reasoning drafts when creating summaries, saving massive token usage and API cost;
+- **Hard token budgeting**: Restricts summarization prompt size to a safe fraction of the model's context window; trims middle turns while preserving initial goals and latest progress;
+- **Deterministic self-healing fallback**: If model calls fail due to network errors or outages, it automatically writes a structured facts-backed checkpoint to land compaction safely and break the deadlock.
+
+### 6. Session statistics
 
 How many times this session compacted, trimmed outputs, or handled an emergency — all recorded. Quit Pi and resume later; the records survive. Check them anytime with `/auto-compact status`.
 
-### 6. Two status bar styles
+### 7. Two status bar styles
 
 - **Default**: the status bar shows `compact: 75%`, staying out of the way and remaining compatible with UI-appearance plugins.
 - **Takeover**: run `/auto-compact footer` and the usage info merges into the end of Pi's native stats line as `14.1%/1.0M (auto:75%)`; while compacting it shows `(auto:compacting...)`.
@@ -84,11 +91,12 @@ Works with default settings — no configuration needed.
 
 | Command | What it does |
 | :--- | :--- |
-| `/auto-compact 80` | Move the auto-compaction trigger line to 80% |
-| `/auto-compact` | Open a dialog to adjust the trigger line |
+| `/auto-compact 80` | Move the auto-compaction trigger line to 80% (**current session only by default**) |
+| `/auto-compact global 80` | Set the trigger line to 80% and **save globally** |
+| `/auto-compact` | Open a dialog to adjust the trigger line (supports numbers or adding global) |
 | `/auto-compact footer` | Switch status bar style |
 | `/auto-compact progress` | Toggle gradient coloring of the usage numbers |
-| `/auto-compact status` | View current settings and session statistics |
+| `/auto-compact status` | View current effective settings (local vs global) and session statistics |
 | `/auto-compact setup` | (Optional) Adjust Pi's built-in fallback compaction settings to recommended values |
 
 ---
@@ -103,14 +111,16 @@ Settings live in `~/.pi/agent/auto-compact.json`:
   "customFooter": false,
   "progressColor": true,
   "autoManageSettings": false,
+  "safeCompaction": true,
   "maxToolResultChars": 50000
 }
 ```
 
-- `threshold`: the auto-compaction trigger line as a percentage of context usage (default 75). Lower = compacts more often, more relaxed; higher = fewer interruptions but more likely to hit emergency compaction.
+- `threshold`: global auto-compaction trigger line as a percentage of context usage (default 75). New sessions always load this global baseline. Running `/auto-compact 60` only affects the current session, while `/auto-compact global 60` updates this global setting.
 - `customFooter`: whether to use the takeover status bar (default off).
 - `progressColor`: whether the usage numbers shift color with usage (default on). When off, falls back to three fixed tiers: red above 90%, yellow above 70%, blue otherwise.
 - `autoManageSettings`: whether the plugin may adjust Pi's built-in fallback compaction settings for you (default off).
+- `safeCompaction`: whether to enable safe compaction overflow defense and thinking stripping (default true).
 - `maxToolResultChars`: the character limit for a single output before it enters the context; anything beyond is trimmed (default 50000; set 0 to disable).
 
 ---

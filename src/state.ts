@@ -7,6 +7,8 @@ import { emptyStats, type CompactionStats } from "./stats.ts";
  */
 export interface ExtensionState {
   config: AutoCompactConfig;
+  /** 当前阈值是否为会话级覆写（local） */
+  isLocalThreshold: boolean;
   /** 是否有压缩正在进行；陈旧值会让所有触发点被守卫永久挡死 */
   isCompacting: boolean;
   /** 上次触发点，或阈值以下的最近水位；null 表示待评估 */
@@ -22,6 +24,7 @@ export interface ExtensionState {
 export function createExtensionState(): ExtensionState {
   return {
     config: loadConfig(),
+    isLocalThreshold: false,
     isCompacting: false,
     lastCheckedPercent: null,
     footerRegistered: false,

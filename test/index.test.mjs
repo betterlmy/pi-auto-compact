@@ -443,22 +443,71 @@ describe("index.ts: 扩展核心集成测试", () => {
     assert.ok(statusMsg.includes("紧急熔断: 2 次"));
   });
 
-  it("16. /auto-compact 拒绝宽松解析的阈值输入，合法输入生效并持久化", async () => {
+  it("16. /auto-compact 拒绝宽松解析的阈值输入，默认仅当前会话(local)生效，加 global 全局持久化", async () => {
     const pi = createMockPi();
     extensionFactory(pi);
 
     const cmd = pi._getCommand("auto-compact");
     const ctx = createMockCtx();
 
+    // 1. 拒绝非法输入
     await cmd.handler("80abc", ctx);
     assert.ok(
-      ctx._notifications.some((n) => n.type === "error" && n.msg.includes("阈值必须是")),
+      ctx._notifications.some((n) => n.type === "error" && n.msg.includes("阈值格式错误")),
       "80abc 不得被宽松解析为 80"
     );
 
+    // 2. 默认纯数字只限制当前会话（local），不写入全局配置文件
     await cmd.handler("80", ctx);
-    assert.ok(ctx._notifications.some((n) => n.msg.includes("自动压缩阈值已设置为 80%")));
-    const saved = JSON.parse(readFileSync(join(piAgentDir, "auto-compact.json"), "utf-8"));
-    assert.equal(saved.threshold, 80, "合法输入必须持久化到配置文件");
+    assert.ok(ctx._notifications.some((n) => n.msg.includes("自动压缩阈值已设置为 80%（仅当前会话生效）")));
+    const configPath = join(piAgentDir, "auto-compact.json");
+    if (existsSync(configPath)) {
+      const globalConfig = JSON.parse(readFileSync(configPath, "utf-8"));
+      assert.notEqual(globalConfig.threshold, 80, "默认 local 设置绝不得改写全局配置文件");
+    }
+    const entries = pi._getAppendedEntries();
+    assert.ok(
+      entries.some((e) => e.type === "auto-compact/session-config" && e.data.threshold === 80),
+      "local 模式应将阈值记录到会话条目供 resume 恢复"
+    );
+
+    // 3. 加上 global 关键字（如 "global 85"）保存到全局配置文件
+    await cmd.handler("global 85", ctx);
+    assert.ok(ctx._notifications.some((n) => n.msg.includes("全局自动压缩阈值已设置为 85%（已保存并全局生效）")));
+    const saved = JSON.parse(readFileSync(configPath, "utf-8"));
+    assert.equal(saved.threshold, 85, "加上 global 后必须持久化到全局配置文件");
+
+    // 4. "88 global" 逆序语法同样支持
+    await cmd.handler("88 global", ctx);
+    assert.ok(ctx._notifications.some((n) => n.msg.includes("全局自动压缩阈值已设置为 88%（已保存并全局生效）")));
+    const saved2 = JSON.parse(readFileSync(configPath, "utf-8"));
+    assert.equal(saved2.threshold, 88);
+  });
+
+  it("17. session_start 默认加载全局配置，若会话条目有 local 覆写则恢复该会话阈值", async () => {
+    const pi = createMockPi();
+    extensionFactory(pi);
+
+    const sessionStartHandler = pi._getHandler("session_start");
+    const cmd = pi._getCommand("auto-compact");
+
+    // 设置全局为 70
+    await cmd.handler("global 70", createMockCtx());
+
+    // 会话 A（新会话，无 entries）：默认加载全局配置 (70%)
+    const ctxA = createMockCtx({ entries: [] });
+    await sessionStartHandler({}, ctxA);
+    await cmd.handler("status", ctxA);
+    assert.ok(ctxA._notifications.at(-1).msg.includes("70% (跟随全局)"));
+
+    // 会话 B（有 local 覆写 entry，比如 60%）：恢复为 60%（仅当前会话）
+    const ctxB = createMockCtx({
+      entries: [
+        { type: "custom", customType: "auto-compact/session-config", data: { threshold: 60 } },
+      ],
+    });
+    await sessionStartHandler({}, ctxB);
+    await cmd.handler("status", ctxB);
+    assert.ok(ctxB._notifications.at(-1).msg.includes("60% (仅当前会话 / 全局: 70%)"));
   });
 });

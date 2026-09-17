@@ -6,7 +6,13 @@ import { join } from "node:path";
 import { createJiti } from "jiti";
 
 const jiti = createJiti(import.meta.url);
-const { loadConfig, saveConfig, checkNativeSafetyNet, applyNativeSafetyNet } = jiti("../src/config.ts");
+const {
+  loadConfig,
+  saveConfig,
+  checkNativeSafetyNet,
+  applyNativeSafetyNet,
+  restoreSessionThreshold,
+} = jiti("../src/config.ts");
 
 describe("config.ts: 配置与原生安全网管理", () => {
   let tempDir;
@@ -98,5 +104,37 @@ describe("config.ts: 配置与原生安全网管理", () => {
     writeFileSync(corruptPath, "{ broken");
     assert.equal(applyNativeSafetyNet(corruptPath), false);
     assert.equal(readFileSync(corruptPath, "utf-8"), "{ broken");
+  });
+
+  it("restoreSessionThreshold 能正确提取最后一个有效阈值覆盖，忽略非法值并在 null 时跟随全局", () => {
+    // 1. 无相关条目
+    assert.equal(restoreSessionThreshold([]), null);
+
+    // 2. 正常提取
+    const entries1 = [
+      { type: "custom", customType: "auto-compact/session-config", data: { threshold: 65 } },
+    ];
+    assert.equal(restoreSessionThreshold(entries1), 65);
+
+    // 3. 多个覆写取最后一个
+    const entries2 = [
+      { type: "custom", customType: "auto-compact/session-config", data: { threshold: 65 } },
+      { type: "custom", customType: "auto-compact/session-config", data: { threshold: 82 } },
+    ];
+    assert.equal(restoreSessionThreshold(entries2), 82);
+
+    // 4. 超出范围（如 5% 或 120%）忽略
+    const entries3 = [
+      { type: "custom", customType: "auto-compact/session-config", data: { threshold: 82 } },
+      { type: "custom", customType: "auto-compact/session-config", data: { threshold: 120 } },
+    ];
+    assert.equal(restoreSessionThreshold(entries3), 82);
+
+    // 5. 显式 threshold: null 重置为跟随全局
+    const entries4 = [
+      { type: "custom", customType: "auto-compact/session-config", data: { threshold: 82 } },
+      { type: "custom", customType: "auto-compact/session-config", data: { threshold: null } },
+    ];
+    assert.equal(restoreSessionThreshold(entries4), null);
   });
 });

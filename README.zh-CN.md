@@ -51,11 +51,18 @@ Pi 自带压缩功能，但默认触发得太晚（通常要到占用 98% 左右
 
 一条命令的输出如果有几十万个字符，插件会在它进入上下文之前裁掉中间部分，保留开头和结尾，并注明省略了多少字。多数情况下，占用达不到 92%，紧急压缩自然也很少发生。
 
-### 5. 会话统计
+### 5. 安全压缩防溢出守护（杜绝 400 报错与死锁）
+
+长会话中开启推理思考（Thinking）时，原生压缩会把几十万字符的思考草稿全量塞入摘要请求，极易触发 `400 ContextWindowExceededError` 并导致死锁。本插件提供安全防护：
+- **剥离无用 Thinking**：生成摘要时自动过滤思考过程，节省大量 Token 与调用成本；
+- **Token 预算硬约束**：根据模型上下文窗口设定安全上限，会话过长时自动保留最初目标和最新状态并修剪中部，确保 Prompt 绝不越界；
+- **确定性自愈快照**：遇到网络异常或模型故障时，自动基于已提取的代码与命令事实生成保底快照，确保压缩正常落地，彻底解救卡死会话。
+
+### 6. 会话统计
 
 本次会话压缩了几次、裁剪了几次、紧急处理了几次，都有记录。中途关闭 Pi 后重新恢复会话，记录仍然保留。随时用 `/auto-compact status` 查看。
 
-### 6. 两种状态栏显示
+### 7. 两种状态栏显示
 
 - **默认**：状态栏显示 `compact: 75%`，不占用其他位置，与界面美化类插件兼容。
 - **接管**：运行 `/auto-compact footer` 后，占用信息合并到 Pi 原生统计行末尾，显示为 `14.1%/1.0M (auto:75%)`；压缩进行中显示 `(auto:compacting...)`。
@@ -84,11 +91,12 @@ pi install git:github.com/betterlmy/pi-auto-compact
 
 | 命令 | 作用 |
 | :--- | :--- |
-| `/auto-compact 80` | 把自动压缩的触发线调整为 80% |
-| `/auto-compact` | 打开对话框调整触发线 |
+| `/auto-compact 80` | 把自动压缩的触发线调整为 80%（**默认仅当前会话生效**） |
+| `/auto-compact global 80` | 将自动压缩触发线设置为 80% 并**保存为全局默认** |
+| `/auto-compact` | 打开对话框调整触发线（可输入数值或加 global） |
 | `/auto-compact footer` | 切换状态栏显示方式 |
 | `/auto-compact progress` | 切换占用数字的渐变变色 |
-| `/auto-compact status` | 查看当前设置和会话统计 |
+| `/auto-compact status` | 查看当前生效阈值（区分当前会话/全局）和会话统计 |
 | `/auto-compact setup` | （可选）把 Pi 自带的兜底压缩配置调整为推荐值 |
 
 ---
@@ -103,14 +111,16 @@ pi install git:github.com/betterlmy/pi-auto-compact
   "customFooter": false,
   "progressColor": true,
   "autoManageSettings": false,
+  "safeCompaction": true,
   "maxToolResultChars": 50000
 }
 ```
 
-- `threshold`：自动压缩的触发线，上下文占用的百分比（默认 75）。调低，压缩更频繁、更从容；调高，打扰更少，但更容易触发紧急压缩。
+- `threshold`：全局自动压缩触发线，上下文占用的百分比（默认 75）。每次启动新会话默认加载该全局值。执行 `/auto-compact 60` 仅调整当前会话，执行 `/auto-compact global 60` 才会改写此全局配置。
 - `customFooter`：是否使用接管式状态栏（默认关闭）。
 - `progressColor`：占用数字是否随用量渐变变色（默认开启）。关闭后改为三档固定色：超过 90% 红色、超过 70% 黄色、其余蓝色。
 - `autoManageSettings`：是否允许插件自动调整 Pi 自带的兜底压缩配置（默认关闭）。
+- `safeCompaction`：是否启用安全压缩防溢出守护与 Thinking 剥离（默认开启）。
 - `maxToolResultChars`：单条输出进入上下文前的字符数上限，超出部分裁剪（默认 50000，设为 0 关闭）。
 
 ---

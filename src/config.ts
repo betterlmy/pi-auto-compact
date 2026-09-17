@@ -48,6 +48,11 @@ export interface AutoCompactConfig {
    * 默认 true；关闭后回退三档语义色（>90% 红 / >70% 黄 / 其余蓝）
    */
   progressColor?: boolean;
+  /**
+   * 是否启用安全压缩防溢出守护（剥离 thinking、预算硬上限截断、模型异常确定性兜底自愈）
+   * 默认 true
+   */
+  safeCompaction?: boolean;
 }
 
 export function loadConfig(customConfigPath = CONFIG_PATH): AutoCompactConfig {
@@ -67,6 +72,7 @@ export function loadConfig(customConfigPath = CONFIG_PATH): AutoCompactConfig {
         customFooter: typeof parsed.customFooter === "boolean" ? parsed.customFooter : false,
         autoManageSettings: typeof parsed.autoManageSettings === "boolean" ? parsed.autoManageSettings : false,
         progressColor: typeof parsed.progressColor === "boolean" ? parsed.progressColor : true,
+        safeCompaction: typeof parsed.safeCompaction === "boolean" ? parsed.safeCompaction : true,
         maxToolResultChars:
           typeof parsed.maxToolResultChars === "number" &&
           Number.isFinite(parsed.maxToolResultChars) &&
@@ -83,6 +89,7 @@ export function loadConfig(customConfigPath = CONFIG_PATH): AutoCompactConfig {
     customFooter: false,
     autoManageSettings: false,
     progressColor: true,
+    safeCompaction: true,
     maxToolResultChars: DEFAULT_MAX_TOOL_RESULT_CHARS,
   };
 }
@@ -183,3 +190,24 @@ export function applyNativeSafetyNet(customSettingsPath = SETTINGS_PATH): boolea
     return false;
   }
 }
+
+/**
+ * 从会话条目中恢复针对当前会话的 local 阈值覆写。
+ * 若未设置或显式重置为跟随全局，返回 null。
+ */
+export function restoreSessionThreshold(entries: any[]): number | null {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry && entry.type === "custom" && entry.customType === "auto-compact/session-config") {
+      const val = entry.data?.threshold;
+      if (typeof val === "number" && val >= MIN_THRESHOLD && val <= MAX_THRESHOLD) {
+        return val;
+      }
+      if (val === null) {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+

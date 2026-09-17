@@ -1,8 +1,15 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { handleAutoCompactCommand } from "./command.ts";
 import { executeCompaction } from "./compaction.ts";
-import { applyNativeSafetyNet, checkNativeSafetyNet, EMERGENCY_THRESHOLD } from "./config.ts";
+import {
+  applyNativeSafetyNet,
+  checkNativeSafetyNet,
+  EMERGENCY_THRESHOLD,
+  loadConfig,
+  restoreSessionThreshold,
+} from "./config.ts";
 import { runContextGuard } from "./guard.ts";
+import { handleSafeCompaction } from "./safe-compaction.ts";
 import { createExtensionState } from "./state.ts";
 import { recordStats, restoreStats } from "./stats.ts";
 import { updateStatusDisplay } from "./status.ts";
@@ -10,6 +17,7 @@ import { truncateToolResultContent } from "./truncate.ts";
 
 export { extractSessionFacts, buildCompactionInstructions } from "./facts.ts";
 export { loadConfig, saveConfig, checkNativeSafetyNet, applyNativeSafetyNet } from "./config.ts";
+export { handleSafeCompaction } from "./safe-compaction.ts";
 
 function hasToolCall(message: any): boolean {
   return (
@@ -28,10 +36,14 @@ function contextPercent(ctx: ExtensionContext): number | null {
 export default function (pi: ExtensionAPI) {
   const state = createExtensionState();
 
-  // 1. 任意来源的压缩开始时刷新状态
-  pi.on("session_before_compact", () => {
+  // 1. 任意来源的压缩开始时刷新状态并进行安全防溢出拦截（剥离 thinking、预算截断、异常自愈兜底）
+  pi.on("session_before_compact", async (event, ctx) => {
     state.isCompacting = true;
     state.requestRenderFn?.();
+
+    if (state.config.safeCompaction !== false) {
+      return await handleSafeCompaction(event, ctx, state);
+    }
   });
 
   // 2. 工具结果入上下文前的预防性截断：超大输出首尾保留，避免单次工具调用
@@ -59,9 +71,21 @@ export default function (pi: ExtensionAPI) {
     updateStatusDisplay(state, ctx);
   });
 
-  // 4. 会话启动：恢复持久化统计（跨 resume 保留），再处理安全网
+  // 4. 会话启动：默认加载全局配置，恢复会话级设置与持久化统计，再处理安全网
   pi.on("session_start", (_event, ctx) => {
-    state.stats = restoreStats(ctx.sessionManager?.getEntries?.() || []);
+    // 默认加载最新全局配置
+    const globalConfig = loadConfig();
+    state.config = { ...globalConfig };
+    state.isLocalThreshold = false;
+
+    // 检查当前会话条目：恢复统计与当前会话级阈值覆写（跨 resume 保持生效）
+    const entries = ctx.sessionManager?.getEntries?.() || [];
+    state.stats = restoreStats(entries);
+    const localThreshold = restoreSessionThreshold(entries);
+    if (localThreshold !== null) {
+      state.config.threshold = localThreshold;
+      state.isLocalThreshold = true;
+    }
 
     // 自动或非侵入检测原生安全网
     if (state.config.autoManageSettings) {
@@ -121,7 +145,7 @@ export default function (pi: ExtensionAPI) {
 
   // 7. 注册 /auto-compact 命令
   pi.registerCommand("auto-compact", {
-    description: "查看或配置自动压缩 (用法: /auto-compact [数值|setup|footer|progress|status])",
-    handler: (args, ctx) => handleAutoCompactCommand(state, args, ctx),
+    description: "查看或配置自动压缩 (用法: /auto-compact [数值|global 数值|setup|footer|progress|status])",
+    handler: (args, ctx) => handleAutoCompactCommand(state, args, ctx, pi),
   });
 }
