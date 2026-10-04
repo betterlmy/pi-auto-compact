@@ -163,7 +163,7 @@ export async function handleAutoCompactCommand(
     updateStatusDisplay(state, ctx);
     if (ctx.hasUI) {
       const base = state.config.progressColor
-        ? "已开启进度渐变配色（绿→黄→红，按「用量/阈值」取色）。"
+        ? "已开启反向对数渐变配色（绿→黄→红，低用量变色慢、临近阈值加速）。"
         : "已关闭进度渐变配色，回退三档语义色（>90% 红 / >70% 黄 / 其余蓝）。";
       ctx.ui.notify(
         persisted ? base : `${base}（写入配置失败，重启后将恢复原配色）`,

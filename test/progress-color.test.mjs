@@ -16,21 +16,37 @@ describe("progress-color.ts: 进度渐变配色", () => {
     assert.equal(progressRatio(Number.NaN, 60), 0);
   });
 
-  it("gradientRgb 端点与中点符合绿→琥珀→红", () => {
+  it("gradientRgb 端点不变，琥珀延后到约 76% 阈值处", () => {
     const start = gradientRgb(0);
     assert.deepEqual(start, { r: 34, g: 197, b: 94 });
-    const mid = gradientRgb(0.5);
-    assert.deepEqual(mid, { r: 234, g: 179, b: 8 });
+    const amberRatio = (1 - 1 / Math.sqrt(10)) / 0.9;
+    assert.deepEqual(gradientRgb(amberRatio), { r: 234, g: 179, b: 8 });
+    assert.ok(amberRatio > 0.75 && amberRatio < 0.77);
     const end = gradientRgb(1);
     assert.deepEqual(end, { r: 239, g: 68, b: 68 });
-    // 中点前 0.25 处应为绿与琥珀的中点
-    const q = gradientRgb(0.25);
-    assert.deepEqual(q, { r: 134, g: 188, b: 51 });
+    assert.deepEqual(gradientRgb(0.25), { r: 78, g: 193, b: 75 });
+    assert.deepEqual(gradientRgb(0.5), { r: 138, g: 188, b: 49 });
+    assert.deepEqual(gradientRgb(0.75), { r: 229, g: 179, b: 10 });
+    assert.deepEqual(gradientRgb(0.9), { r: 236, g: 130, b: 35 });
   });
 
   it("gradientRgb 超界值安全钳制", () => {
     assert.deepEqual(gradientRgb(-1), { r: 34, g: 197, b: 94 });
     assert.deepEqual(gradientRgb(2), { r: 239, g: 68, b: 68 });
+    for (const invalid of [Number.NaN, Infinity, -Infinity]) {
+      assert.deepEqual(gradientRgb(invalid), { r: 34, g: 197, b: 94 });
+    }
+  });
+
+  it("前段保持偏绿，后段向红色加速且阈值处连续", () => {
+    const low = gradientRgb(0.25);
+    assert.ok(low.r < 134 && low.g > 188, "比原线性四分之一处更偏绿");
+    const half = gradientRgb(0.5);
+    assert.ok(half.g > 179, "半程尚未到琥珀端点");
+    const lateDrop = gradientRgb(0.8).g - gradientRgb(0.9).g;
+    const earlyDrop = gradientRgb(0.1).g - gradientRgb(0.2).g;
+    assert.ok(lateDrop > earlyDrop, "临近阈值变色更快");
+    assert.deepEqual(gradientRgb(1 - 1e-10), gradientRgb(1));
   });
 
   it("rgbToAnsi256 灰阶与彩色量化", () => {

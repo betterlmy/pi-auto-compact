@@ -43,7 +43,7 @@ export interface AutoCompactConfig {
    */
   autoManageSettings?: boolean;
   /**
-   * 内联 Footer 上下文用量进度渐变配色（绿→黄→红，按「用量/阈值」比值取色）
+   * 内联 Footer 反向对数渐变配色（绿→黄→红，临近阈值加速变色）
    * 默认 true；关闭后回退三档语义色（>90% 红 / >70% 黄 / 其余蓝）
    */
   progressColor?: boolean;

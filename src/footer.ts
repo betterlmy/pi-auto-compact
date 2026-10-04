@@ -135,7 +135,7 @@ export function buildCustomFooterComponent(
             ? `?/${formatTokens(contextWindow)}${autoIndicator}`
             : `${contextPercent}%/${formatTokens(contextWindow)}${autoIndicator}`;
 
-        // 渐变进度色（可配置关闭）：以「用量/阈值」比值在绿→琥珀→红间取色；
+        // 渐变进度色（可配置关闭）：以「用量/阈值」经反向对数映射后在绿→琥珀→红间取色；
         // 关闭时回退三档语义色（与 pi 原生 footer 的 90/70 分界一致，低用量补 mdLink 蓝）。
         // contextPercentDisplay 是 statsLeft 的最后一段，彩色重置码不会破坏外层 dim 包装。
         let contextPercentStr: string;

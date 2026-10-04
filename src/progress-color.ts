@@ -1,6 +1,6 @@
 /**
- * 上下文用量进度渐变配色：以「当前用量 / 阈值」的比值取色，
- * 0 → 绿色起步，0.5 → 琥珀，1 → 红色（达到或超过阈值后保持全红）。
+ * 上下文用量进度渐变配色：对「当前用量 / 阈值」应用反向对数曲线，
+ * 低用量变色慢，临近阈值加速；约 76% 阈值处为琥珀，达到阈值后保持红色。
  * 纯计算模块，不依赖运行时环境，便于独立测试。
  */
 export interface Rgb {
@@ -22,9 +22,10 @@ export function progressRatio(percent: number, threshold: number): number {
   return Math.min(1, Math.max(0, percent / threshold));
 }
 
-/** 按比值在 STOPS 间分段线性插值出 RGB */
+/** 比值先按 -log(1 - 0.9t) / log(10) 映射，再在色标间插值。 */
 export function gradientRgb(ratio: number): Rgb {
-  const t = Math.min(1, Math.max(0, ratio));
+  const clamped = Number.isFinite(ratio) ? Math.min(1, Math.max(0, ratio)) : 0;
+  const t = clamped === 1 ? 1 : -Math.log1p(-0.9 * clamped) / Math.LN10;
   for (let i = 1; i < STOPS.length; i++) {
     const prev = STOPS[i - 1];
     const next = STOPS[i];

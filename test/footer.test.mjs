@@ -69,9 +69,9 @@ describe("footer.ts: 统计聚合与格式化", () => {
     const near = createFooterHarness([], { percent: 74, threshold: 75 }).render(100).join(" ");
     assert.ok(near.includes("\x1b[38;2;239;"), `接近阈值应为红端：${near}`);
 
-    // 显式开启同样生效：10/75 ≈ 0.133，落在绿→琥珀段（f≈0.267），插值色 (87,192,71)
+    // 10/75 经反向对数映射后保持偏绿，插值色 (56,195,84)
     const on = createFooterHarness([], { percent: 10, threshold: 75, progressColor: true }).render(100).join(" ");
-    assert.ok(on.includes("\x1b[38;2;87;192;71m"), `低用量应为绿色插值：${on}`);
+    assert.ok(on.includes("\x1b[38;2;56;195;84m"), `低用量应为绿色插值：${on}`);
   });
 
   it("progressColor 关闭时回退三档语义色：>90 红 / >70 黄 / 低用量蓝", () => {

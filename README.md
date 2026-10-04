@@ -112,7 +112,7 @@ File: `~/.pi/agent/auto-compact.json`.
 | --- | --- | --- |
 | `threshold` | `75` | Global trigger line; session overrides take precedence |
 | `customFooter` | `false` | Use `setStatus` by default; replace the footer when enabled |
-| `progressColor` | `true` | Color takeover-footer usage by usage divided by threshold |
+| `progressColor` | `true` | Use a reverse-logarithmic gradient that accelerates near the trigger line |
 | `autoManageSettings` | `false` | Allow automatic changes to native compaction settings in Pi's main settings file |
 | `safeCompaction` | `true` | Clean summary input, budget the complete estimated request, and cancel on failure |
 | `maxToolResultChars` | `50000` | Text limit per tool result; `0` disables trimming |
@@ -123,7 +123,9 @@ Compaction, trimming, and emergency counts are saved in session entries and rest
 
 The default `compact: 75%` status does not replace another extension's footer. After `/auto-compact footer`, the stats line can show `14.1%/1.0M (auto:75%)`, or `(auto:compacting...)` during compaction.
 
-The gradient represents usage relative to the trigger line, not an independent risk assessment. When disabled, fixed tiers are red above 90%, yellow above 70%, and blue otherwise.
+The gradient clamps `t = usage / threshold` to 0–1, then maps it through `-log(1 - 0.9t) / log(10)`: low usage stays greener, with faster changes toward amber and red near the trigger line. Amber is reached at about 76% of the trigger line; at or above the line, the color stays red. This does not change the compaction threshold or provide an independent risk assessment. When disabled, fixed tiers are red above 90%, yellow above 70%, and blue otherwise.
+
+The screenshots below retain the previous linear-gradient examples to illustrate footer layout and color endpoints, not the exact current colors at the same usage.
 
 <p align="center">
   <img src="./assets/progress-green.png" alt="Green progress at low usage" width="85%" />
@@ -131,9 +133,9 @@ The gradient represents usage relative to the trigger line, not an independent r
 <p align="center"><em>Low usage</em></p>
 
 <p align="center">
-  <img src="./assets/progress-yellow.png" alt="Amber progress near half of the trigger line" width="85%" />
+  <img src="./assets/progress-yellow.png" alt="Amber progress example from the previous linear gradient" width="85%" />
 </p>
-<p align="center"><em>Near half of the trigger line</em></p>
+<p align="center"><em>Amber example (previous linear curve)</em></p>
 
 <p align="center">
   <img src="./assets/progress-red.png" alt="Red progress approaching the trigger line" width="85%" />

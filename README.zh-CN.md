@@ -112,7 +112,7 @@ Pi 原生压缩仍可先触发，其阈值为 `contextWindow - reserveTokens`，
 | --- | --- | --- |
 | `threshold` | `75` | 全局触发线；会话级阈值优先 |
 | `customFooter` | `false` | 默认使用 `setStatus`；开启后替换 Footer |
-| `progressColor` | `true` | 接管 Footer 中按“用量 ÷ 触发线”渐变配色 |
+| `progressColor` | `true` | 接管 Footer 中按反向对数曲线渐变配色，临近触发线加速 |
 | `autoManageSettings` | `false` | 是否允许自动调整 Pi 主设置中的原生压缩配置 |
 | `safeCompaction` | `true` | 摘要清洗、完整请求估算预算与失败取消策略 |
 | `maxToolResultChars` | `50000` | 单条工具结果文本上限；`0` 关闭裁剪 |
@@ -123,7 +123,9 @@ Pi 原生压缩仍可先触发，其阈值为 `contextWindow - reserveTokens`，
 
 默认显示 `compact: 75%`，不替换其他插件的 Footer。使用 `/auto-compact footer` 后，统计行可显示 `14.1%/1.0M (auto:75%)`，压缩期间显示 `(auto:compacting...)`。
 
-渐变按当前用量与触发线的比值取色，不是单独的风险判定。关闭渐变后恢复固定三档：超过 90% 红色、超过 70% 黄色，其余蓝色。
+渐变将 `t = 当前用量 ÷ 触发线` 钳制到 0–1，再按 `-log(1 - 0.9t) / log(10)` 取色：低用量保持偏绿，临近触发线时加速变黄、变红。约达到触发线的 76% 时为琥珀色，达到触发线后保持红色。它不改变实际压缩阈值，也不是单独的风险判定。关闭渐变后恢复固定三档：超过 90% 红色、超过 70% 黄色，其余蓝色。
+
+以下截图保留旧版线性渐变示例，仅展示 Footer 布局与颜色端点，不代表当前曲线在相同用量下的精确颜色。
 
 <p align="center">
   <img src="./assets/progress-green.png" alt="低用量时的绿色进度" width="85%" />
@@ -131,9 +133,9 @@ Pi 原生压缩仍可先触发，其阈值为 `contextWindow - reserveTokens`，
 <p align="center"><em>低用量</em></p>
 
 <p align="center">
-  <img src="./assets/progress-yellow.png" alt="接近触发线半程时的琥珀色进度" width="85%" />
+  <img src="./assets/progress-yellow.png" alt="旧版线性渐变的琥珀色进度示例" width="85%" />
 </p>
-<p align="center"><em>接近触发线半程</em></p>
+<p align="center"><em>琥珀色示例（旧版线性曲线）</em></p>
 
 <p align="center">
   <img src="./assets/progress-red.png" alt="接近触发线时的红色进度" width="85%" />
