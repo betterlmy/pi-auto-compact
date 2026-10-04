@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { extractSessionFacts } from "./facts.ts";
+import { buildCompactionInstructions, extractSessionFacts } from "./facts.ts";
 import type { ExtensionState } from "./state.ts";
 
 /**
- * 字符到 Token 的保守估算比例（中文和代码符号密集场景下，1 token 约 3 字符）。
+ * 字符到 Token 的启发式估算比例；不是 tokenizer，不保证对所有文本保守。
  */
 export const CHARS_PER_TOKEN = 3;
 
@@ -190,56 +190,22 @@ export function sanitizeAndFormatMessage(msg: any): string | null {
 /**
  * 带预算硬约束的安全序列化：
  * 若清洗后的消息总长度超出字符预算（maxCharsBudget），
- * 保留前部（初始任务背景）与后部（最新关键进展），截断中间历史，
- * 确保送入模型的总字符数绝对在预算内，物理上杜绝 400 ContextWindowExceededError。
+ * 保留前部（初始任务背景）与后部（最新关键进展），截断中间历史。
+ * 字符数严格受控，但字符/token 换算仅为估算，不能保证提供商永不超限。
  */
 export function serializeMessagesWithBudget(messages: any[], maxCharsBudget: number): string {
-  const formatted: string[] = [];
-  for (const msg of messages) {
-    const s = sanitizeAndFormatMessage(msg);
-    if (s) formatted.push(s);
-  }
+  if (!Number.isFinite(maxCharsBudget) || maxCharsBudget <= 0) return "";
+  const budget = Math.floor(maxCharsBudget);
+  const text = messages.map(sanitizeAndFormatMessage).filter(Boolean).join("\n\n")
+    || "No conversation history to summarize.";
+  if (text.length <= budget) return text;
 
-  if (formatted.length === 0) return "No conversation history to summarize.";
-
-  const totalLen = formatted.reduce((acc, str) => acc + str.length + 2, 0);
-  if (totalLen <= maxCharsBudget) {
-    return formatted.join("\n\n");
-  }
-
-  // 超限截断策略：保留前部（约 20% 预算）+ 保留后部（约 80% 预算）
-  const headBudget = Math.floor(maxCharsBudget * 0.2);
-  const tailBudget = maxCharsBudget - headBudget;
-
-  const headParts: string[] = [];
-  let headChars = 0;
-  let headIndex = 0;
-  while (headIndex < formatted.length) {
-    const item = formatted[headIndex];
-    if (headChars + item.length > headBudget && headParts.length > 0) break;
-    headParts.push(item);
-    headChars += item.length + 2;
-    headIndex++;
-  }
-
-  const tailParts: string[] = [];
-  let tailChars = 0;
-  let tailIndex = formatted.length - 1;
-  while (tailIndex >= headIndex) {
-    const item = formatted[tailIndex];
-    if (tailChars + item.length > tailBudget && tailParts.length > 0) break;
-    tailParts.unshift(item);
-    tailChars += item.length + 2;
-    tailIndex--;
-  }
-
-  const omittedCount = tailIndex - headIndex + 1;
-  const omittedNote =
-    omittedCount > 0
-      ? `\n\n[... 因会话历史过长，此处省略了中间 ${omittedCount} 条早期消息以适配模型窗口 ...]\n\n`
-      : "\n\n";
-
-  return `${headParts.join("\n\n")}${omittedNote}${tailParts.join("\n\n")}`;
+  const marker = "\n\n[... 历史中部已省略，首尾片段可能被截断 ...]\n\n";
+  if (budget <= marker.length) return marker.slice(0, budget);
+  const available = budget - marker.length;
+  const head = Math.floor(available * 0.2);
+  const tail = available - head;
+  return `${text.slice(0, head)}${marker}${tail > 0 ? text.slice(-tail) : ""}`;
 }
 
 /**
@@ -257,34 +223,6 @@ export function formatFileOperationsXml(readFiles: string[], modifiedFiles: stri
   return `\n\n${sections.join("\n\n")}`;
 }
 
-/**
- * 确定性降级快照（Deterministic Fallback Summary）：
- * 当模型摘要调用因不可抗力（网络断开、服务端 500、超长拒识等）完全失败时，
- * 基于已提取的确定性事实生成结构化检查点，确保 firstKeptEntryId 正常落地推进，
- * 释放旧上下文空间并彻底打破死锁。
- */
-export function buildDeterministicFallbackSummary(
-  facts: { goalText?: string; modifiedFiles: string[]; recentCommands: string[] },
-  previousSummary?: string
-): string {
-  const goal = facts.goalText || "(未显式声明)";
-  const files =
-    facts.modifiedFiles.length > 0
-      ? facts.modifiedFiles.map((f) => `- ${f}`).join("\n")
-      : "- (无记录修改文件)";
-  const cmds =
-    facts.recentCommands.length > 0
-      ? facts.recentCommands.map((c) => `- \`${c}\``).join("\n")
-      : "- (无)";
-
-  let base = `## Goal\n${goal}\n\n## Constraints & Preferences\n- (none)\n\n## Progress\n### Done\n- [x] 上下文自愈压缩（模型摘要异常，已采用确定性事实快照兜底释放空间）\n\n## Key Decisions\n- **Context Recovery**: 基于已提取的代码修改与操作事实落地上下文检查点。\n\n## Next Steps\n1. 继续执行未完成的任务目标\n\n## Critical Context\n### Recent Commands\n${cmds}\n### Modified Files\n${files}`;
-
-  if (previousSummary) {
-    base = `[前置会话检查点]\n${previousSummary}\n\n---\n\n${base}`;
-  }
-  return base;
-}
-
 function toIterableArray(val: unknown): string[] {
   if (!val) return [];
   if (Array.isArray(val)) return val.filter((x) => typeof x === "string");
@@ -297,7 +235,7 @@ function toIterableArray(val: unknown): string[] {
 /**
  * 安全压缩拦截处理器：
  * 在 session_before_compact 拦截默认的 _runDefaultCompaction，
- * 执行 thinking 剥离、预算硬截断、以及模型异常降级自愈。
+ * 执行 thinking 剥离、完整请求的估算预算控制；失败时取消压缩。
  */
 export async function handleSafeCompaction(
   event: any,
@@ -309,123 +247,106 @@ export async function handleSafeCompaction(
   }
 
   const { preparation, customInstructions, signal } = event;
-  if (!preparation || !preparation.firstKeptEntryId) return;
-
-  const {
-    firstKeptEntryId,
-    messagesToSummarize = [],
-    turnPrefixMessages = [],
-    previousSummary,
-    tokensBefore = 0,
-    fileOps,
-  } = preparation;
-
-  // 提取确定性事实
-  const facts = extractSessionFacts(ctx.sessionManager);
-
-  // 合并提取修改文件和读取文件
-  const readSet = new Set<string>([
-    ...toIterableArray(fileOps?.read),
-    ...(facts.readFiles || []),
-  ]);
-  const modifiedSet = new Set<string>([
-    ...toIterableArray(fileOps?.written),
-    ...toIterableArray(fileOps?.edited),
-    ...(facts.modifiedFiles || []),
-  ]);
-  const readFiles = Array.from(readSet).filter((f) => !modifiedSet.has(f)).sort();
-  const modifiedFiles = Array.from(modifiedSet).sort();
-
-  // 计算当前模型上下文窗口与安全字符预算
-  const model = ctx.model;
-  const contextWindow = model?.contextWindow && model.contextWindow > 0 ? model.contextWindow : 204800;
-  // 安全输入 Token 预算：占窗口的 70%（保守按 CHARS_PER_TOKEN 换算字符），绝不逼近模型天花板
-  const safeTokensBudget = Math.max(8000, Math.floor(contextWindow * 0.7));
-  const maxCharsBudget = safeTokensBudget * CHARS_PER_TOKEN;
-
-  // 合并待总结消息并序列化（彻底去除 thinking，必要时首尾截断）
-  const allMessages = [...messagesToSummarize, ...turnPrefixMessages];
-  const conversationText = serializeMessagesWithBudget(allMessages, maxCharsBudget);
-
-  // 构建 Prompt
-  const basePrompt = previousSummary ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;
-  let promptText = `<conversation>\n${conversationText}\n</conversation>\n\n`;
-  if (previousSummary) {
-    promptText += `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`;
-  }
-  promptText += basePrompt;
-  if (customInstructions) {
-    promptText += `\n\nAdditional focus: ${customInstructions}`;
-  }
-
-  let summary = "";
-  let usage: any = undefined;
-
-  // 尝试调用模型生成总结
-  try {
-    if (signal?.aborted) {
-      return { cancel: true };
+  const sessionEpoch = state.sessionEpoch;
+  const sessionId = ctx.sessionManager?.getSessionId?.();
+  const leafId = ctx.sessionManager?.getLeafId?.();
+  const cancelled = () => signal?.aborted || state.sessionEpoch !== sessionEpoch
+    || ctx.sessionManager?.getSessionId?.() !== sessionId
+    || ctx.sessionManager?.getLeafId?.() !== leafId;
+  const fail = (message: string) => {
+    if (ctx.hasUI && !cancelled()) {
+      ctx.ui.notify(`[Auto Compact] 摘要失败：${message}。已取消压缩并保留原上下文；请检查后手动重试，不会自动续跑。`, "warning");
     }
-
-    if (ctx.modelRegistry && model) {
-      const response = await ctx.modelRegistry.complete(
-        model,
-        {
-          systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
-          messages: [
-            {
-              role: "user",
-              content: [{ type: "text", text: promptText }],
-              timestamp: Date.now(),
-            },
-          ],
-        },
-        {
-          maxTokens: Math.min(4096, model.maxTokens > 0 ? model.maxTokens : 4096),
-          signal,
-          cacheRetention: "none",
-          sessionId: randomUUID(),
-        }
-      );
-
-      summary = Array.isArray(response.content)
-        ? response.content
-            .filter((c: any) => c && c.type === "text" && typeof c.text === "string")
-            .map((c: any) => c.text)
-            .join("\n")
-        : "";
-
-      usage = response.usage;
-    }
-  } catch (err: any) {
-    if (signal?.aborted || err?.name === "AbortError") {
-      return { cancel: true };
-    }
-    if (ctx.hasUI) {
-      ctx.ui.notify(
-        `[Auto Compact] 模型总结异常 (${err?.message || err})，已自动切换确定性事实快照兜底自愈`,
-        "warning"
-      );
-    }
-    // 降级自愈：使用确定性事实快照
-    summary = buildDeterministicFallbackSummary(facts, previousSummary);
-  }
-
-  // 若总结结果为空（例如模型无输出或无可用 modelRegistry），使用兜底
-  if (!summary.trim()) {
-    summary = buildDeterministicFallbackSummary(facts, previousSummary);
-  }
-
-  // 追加标准文件操作标签
-  summary += formatFileOperationsXml(readFiles, modifiedFiles);
-
-  return {
-    compaction: {
-      summary,
-      firstKeptEntryId,
-      tokensBefore,
-      usage,
-      details: { readFiles, modifiedFiles },
-    },
+    return { cancel: true };
   };
+  if (cancelled()) return { cancel: true };
+  if (!preparation || !preparation.firstKeptEntryId) return fail("缺少有效压缩边界");
+
+  try {
+    const {
+      firstKeptEntryId,
+      messagesToSummarize = [],
+      turnPrefixMessages = [],
+      previousSummary,
+      tokensBefore = 0,
+      fileOps,
+    } = preparation;
+
+    const facts = extractSessionFacts(ctx.sessionManager);
+    const readSet = new Set<string>([
+      ...toIterableArray(fileOps?.read),
+      ...facts.readFiles,
+    ]);
+    const modifiedSet = new Set<string>([
+      ...toIterableArray(fileOps?.written),
+      ...toIterableArray(fileOps?.edited),
+      ...facts.modifiedFiles,
+    ]);
+    const readFiles = Array.from(readSet).filter((f) => !modifiedSet.has(f)).sort();
+    const modifiedFiles = Array.from(modifiedSet).sort();
+
+    const model = ctx.model;
+    if (!model || !ctx.modelRegistry || !Number.isFinite(model.contextWindow) || model.contextWindow <= 0) {
+      return fail("缺少可用模型或有效上下文窗口");
+    }
+    const outputTokens = Math.min(4096, model.maxTokens > 0 ? model.maxTokens : 4096);
+    // 同时预留模型输出及 30% 窗口余量，不用固定最低预算突破小窗口。
+    const inputTokens = Math.floor(model.contextWindow * 0.7) - outputTokens;
+    const maxCharsBudget = Math.max(0, inputTokens * CHARS_PER_TOKEN);
+    const basePrompt = previousSummary ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;
+    const prefix = "<conversation>\n";
+    let suffix = "\n</conversation>\n\n";
+    if (previousSummary) suffix += `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`;
+    suffix += `${basePrompt}\n\n${buildCompactionInstructions(facts)}`;
+    if (customInstructions) suffix += `\n\nAdditional focus: ${customInstructions}`;
+    const historyBudget = maxCharsBudget - SUMMARIZATION_SYSTEM_PROMPT.length - prefix.length - suffix.length;
+    // 旧摘要、事实与用户附加要求不静默删改；它们放不下时拒绝生成检查点。
+    if (historyBudget <= 0) return fail("固定提示、旧摘要或附加要求已超过估算输入预算");
+    const conversationText = serializeMessagesWithBudget([...messagesToSummarize, ...turnPrefixMessages], historyBudget);
+    const promptText = `${prefix}${conversationText}${suffix}`;
+
+    const response = await ctx.modelRegistry.complete(
+      model,
+      {
+        systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
+        messages: [{
+          role: "user",
+          content: [{ type: "text", text: promptText }],
+          timestamp: Date.now(),
+        }],
+      },
+      {
+        maxTokens: outputTokens,
+        signal,
+        cacheRetention: "none",
+        sessionId: randomUUID(),
+      }
+    );
+
+    if (cancelled()) return { cancel: true };
+    if (response.stopReason !== "stop") {
+      return fail(`模型未完整结束（${response.stopReason || "未知状态"}）${response.errorMessage ? `：${response.errorMessage}` : ""}`);
+    }
+    let summary = Array.isArray(response.content)
+      ? response.content
+          .filter((c: any) => c && c.type === "text" && typeof c.text === "string")
+          .map((c: any) => c.text)
+          .join("\n")
+      : "";
+    if (!summary.trim()) return fail("模型返回空摘要");
+
+    summary += formatFileOperationsXml(readFiles, modifiedFiles);
+    return {
+      compaction: {
+        summary,
+        firstKeptEntryId,
+        tokensBefore,
+        usage: response.usage,
+        details: { readFiles, modifiedFiles },
+      },
+    };
+  } catch (err: any) {
+    if (cancelled() || err?.name === "AbortError") return { cancel: true };
+    return fail(err?.message || String(err));
+  }
 }

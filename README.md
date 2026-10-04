@@ -1,110 +1,101 @@
-<div align="center">
-
 # @betterlmy/pi-auto-compact
 
-**Automatic context management for the Pi coding agent: long conversations without interruptions or lost details.**
+**Lightweight context preservation and recovery assistance for Pi Coding Agent.**
 
-**English** | [简体中文](./README.zh-CN.md)
+English | [简体中文](./README.zh-CN.md)
 
-</div>
+Pi already provides automatic compaction, between-tool-batch continuation, and overflow recovery. This extension adds protection around that workflow: bounded tool output, active-branch fact extraction, cleaned summary input, and limited post-compaction checks.
 
----
-
-## What problem does this solve?
-
-Two concepts first:
-
-**Context**: everything the AI can "see" while working on a task — your requests, its replies, commands it ran, and their output. Context has a size limit; once it's full, nothing new fits.
-
-**Compaction**: when the context nears its limit, earlier content is condensed into a shorter summary to free up space.
-
-Pi has built-in compaction, but by default it triggers very late (around 98% usage), which causes two common problems:
-
-1. **Interrupted work**: compaction often happens in the middle of a task;
-2. **Lossy summaries**: the summary can drop file paths you edited, commands you ran, or the current task goal.
-
-This plugin manages both when compaction happens and what it preserves, avoiding these problems.
-
-## What changes after installing?
-
-### 1. Mandatory compaction at threshold with auto-resume
-
-- When context usage reaches the configured threshold (default 75%, configurable per-session or globally), the plugin **triggers compaction immediately** (either mid-run after a tool execution or when settled), rather than waiting until the context is blown or idling out.
-- **Seamless auto-resume**: Compaction completes and immediately dispatches an invisible continuation turn to resume the interrupted or ongoing task. No need to manually prompt "continue" — mirroring the fluid experience of Codex and Claude Code.
-- If a single operation pushes usage past **92%** instantly, it escalates to emergency breakpoint preservation, capturing interrupted tool details alongside deterministic facts so the resumed turn picks up without missing a beat.
-
-### 2. Extracts key facts before compacting, so summaries stay complete
-
-Before compacting, the plugin pulls the following directly from the conversation history and hands it to the AI along with the summary request:
-
-- Files modified (exact paths)
-- Files read
-- Commands executed
-- The current task goal
-
-This information comes from checking the raw history entry by entry — it does not rely on the AI's memory, so summaries are far less likely to get things wrong.
-
-### 3. Verifies after compacting, restores what's missing
-
-Once the summary is generated, the plugin checks whether all of the above made it in. If something was dropped, the plugin quietly adds the missing content back into the conversation — nothing shows up on screen. The next step starts from complete information.
-
-### 4. Trims oversized outputs before they enter the context
-
-If one command's output is hundreds of thousands of characters, the plugin trims the middle before it enters the context — keeping the beginning and end, with a note of how many characters were omitted. In most cases usage never reaches 92%, so emergency compaction rarely happens at all.
-
-### 5. Safe compaction overflow defense (prevents 400 errors and deadlocks)
-
-In long sessions with reasoning/thinking enabled, native compaction serializes hundreds of thousands of internal thinking characters directly into the summarization prompt, readily triggering `400 ContextWindowExceededError` and deadlocking the session. This extension prevents that:
-- **Strips internal thinking**: Automatically omits reasoning drafts when creating summaries, saving massive token usage and API cost;
-- **Hard token budgeting**: Restricts summarization prompt size to a safe fraction of the model's context window; trims middle turns while preserving initial goals and latest progress;
-- **Deterministic self-healing fallback**: If model calls fail due to network errors or outages, it automatically writes a structured facts-backed checkpoint to land compaction safely and break the deadlock.
-
-### 6. Session statistics
-
-How many times this session compacted, trimmed outputs, or handled an emergency — all recorded. Quit Pi and resume later; the records survive. Check them anytime with `/auto-compact status`.
-
-### 7. Two status bar styles
-
-- **Default**: the status bar shows `compact: 75%`, staying out of the way and remaining compatible with UI-appearance plugins.
-- **Takeover**: run `/auto-compact footer` and the usage info merges into the end of Pi's native stats line as `14.1%/1.0M (auto:75%)`; while compacting it shows `(auto:compacting...)`.
-
-In takeover mode the usage numbers change color as usage grows: the closer to the trigger line, the redder. The color is picked by the ratio of current usage to the trigger line — green at the start, amber near the middle, red at the line (e.g. trigger line 60% and current usage 50% picks the color at 50/60 ≈ 83%). Not a fan? Run `/auto-compact progress` to switch back to the fixed red/yellow/blue tiers.
-
----
+No separate summary model, Python runtime, or independent history archive is required. Summaries use the current session model. **Compaction remains lossy: these protections reduce risk, not guarantee permanent memory.**
 
 ## Installation
 
-Run either command in your terminal, then restart Pi (or run `/reload`):
-
 ```bash
-# Install from npm (recommended)
 pi install npm:@betterlmy/pi-auto-compact
 
-# Or install from GitHub
+# Or install from source
 pi install git:github.com/betterlmy/pi-auto-compact
 ```
 
-Works with default settings — no configuration needed.
+Restart Pi or run `/reload`. The npm peer range is Pi `>=0.84.0`; native scheduling varies by version, and the declared range does not mean every later release has been tested.
 
----
+## What the extension adds
 
-## Handy Commands
+### Bounded tool output before it enters context
 
-| Command | What it does |
-| :--- | :--- |
-| `/auto-compact 80` | Move the auto-compaction trigger line to 80% (**current session only by default**) |
-| `/auto-compact global 80` | Set the trigger line to 80% and **save globally** |
-| `/auto-compact` | Open a dialog to adjust the trigger line (supports numbers or adding global) |
-| `/auto-compact footer` | Switch status bar style |
-| `/auto-compact progress` | Toggle gradient coloring of the usage numbers |
-| `/auto-compact status` | View current effective settings (local vs global) and session statistics |
-| `/auto-compact setup` | (Optional) Adjust Pi's built-in fallback compaction settings to recommended values |
+By default, text in a single tool result is limited to **50,000 characters**, keeping the beginning and end with an omission marker. Images and other non-text blocks do not count toward this limit.
 
----
+This reduces the risk of a large log filling the window. The extension does not separately archive the omitted middle. If you need the complete output, write it to a file first and read selected sections. Set `maxToolResultChars: 0` to disable trimming.
 
-## Configuration (Optional)
+### Active-branch facts and the latest request
 
-Settings live in `~/.pi/agent/auto-compact.json`:
+The extension extracts from raw records on the active session branch:
+
+- Paths involved in `write` / `edit` calls, up to 30.
+- Other paths involved in `read` calls, up to 15.
+- Recent deduplicated `bash` commands, up to 8.
+- Explicit goals from `/goal` or recognized goal messages.
+- The latest ordinary user request, bounded to 2,000 characters with a truncation marker when necessary.
+
+These are supplied as summary instructions. **A tool call is not proof of successful execution; the latest request is not proof that work remains unfinished.** This is not semantic understanding of every tool, constraint, or task.
+
+### Clean summary input and a complete-request budget
+
+With `safeCompaction` enabled by default, the extension handles `session_before_compact` for manual, native automatic, and extension-triggered compactions:
+
+- Omit assistant thinking drafts from serialized summary input.
+- Bound serialized tool results and tool-call arguments.
+- Budget the system prompt, previous summary, facts, extra instructions, history text, and output allowance together.
+- Keep head/tail excerpts when history is too long, with an explicit omission marker. If fixed instructions or the previous summary alone cannot fit, cancel rather than silently trim them.
+
+The estimate uses **3 characters per token**, keeping estimated input plus output within 70% of the model window. Output is capped at the smaller of the model's output limit and 4,096 tokens. **This is not an exact tokenizer and cannot guarantee that every provider request fits.**
+
+### Limited post-compaction checks
+
+The guard checks keyword fragments of explicit goals and paths involved in modification calls. If the bounded latest user request does not appear verbatim in the summary, it is also restored.
+
+Restoration messages enter model context without starting a turn or appearing in the transcript. Goal matching is heuristic. Commands, read paths, all constraints, and the summary's business correctness are not individually verified.
+
+## Compaction and continuation behavior
+
+The default threshold is **75%**, adjustable per session or globally:
+
+| Situation | Behavior |
+| --- | --- |
+| The agent has fully settled and usage reaches the threshold | Request compaction; remain idle afterward, without restarting completed work |
+| A tool turn finishes and usage reaches the threshold | Request compaction; after success, send one hidden continuation only if the host is idle and no input is queued |
+| Usage at that tool boundary reaches **92%** | Add emergency preservation instructions for the last operation's state and next intended step |
+| Summary failure, empty output, output-length truncation, or cancellation | Cancel compaction; do not commit a degraded snapshot or automatically resume through this extension |
+
+92% is a fixed emergency classification, not a separate always-active trigger. Checks run after tool execution finishes, not halfway through a tool operation.
+
+Native Pi compaction can still trigger first at `contextWindow - reserveTokens`, not a fixed 98%. Native retries and queue scheduling belong to Pi. The `ctx.compact()` path may stop the active agent run; a continuation starts a new model turn rather than seamlessly preserving the underlying run.
+
+### Preserve information on failure
+
+If safe summarization fails, the extension cancels instead of substituting a facts-only snapshot or committing an incomplete checkpoint. **That compaction does not replace the old context, but it also does not free space.** Tool trimming that already occurred earlier is not undone.
+
+Fix model, network, or input-size problems and retry with `/compact`. An already overflowing session may still need manual intervention; this is not a guarantee of automatic recovery from every stuck session. Setting `safeCompaction: false` delegates summary generation and failure handling to Pi.
+
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `/auto-compact` | Open the threshold input dialog |
+| `/auto-compact 80` | Set a session-only threshold, restored when that session resumes |
+| `/auto-compact global 80` | Save a global threshold and make the current session follow it |
+| `/auto-compact status` | Show effective settings, failure policy, and session statistics |
+| `/auto-compact footer` | Toggle the default status line and takeover footer |
+| `/auto-compact progress` | Toggle gradient and fixed-tier colors |
+| `/auto-compact setup` | After confirmation, enable native compaction, set a 50,000-token response reserve, and enable settings management |
+
+Threshold commands accept integers from 10 to 99. Very low thresholds may leave Pi without enough old history to compact; summarization itself also requires a model call and window headroom.
+
+`setup` is not universally optimal: a 50,000-token reserve corresponds to about 95% usage on a 1M window, but about 75% on a 200K window. Assess smaller windows carefully. Pi's main settings are not modified by default.
+
+## Configuration
+
+File: `~/.pi/agent/auto-compact.json`.
 
 ```json
 {
@@ -117,41 +108,54 @@ Settings live in `~/.pi/agent/auto-compact.json`:
 }
 ```
 
-- `threshold`: global auto-compaction trigger line as a percentage of context usage (default 75). New sessions always load this global baseline. Running `/auto-compact 60` only affects the current session, while `/auto-compact global 60` updates this global setting.
-- `customFooter`: whether to use the takeover status bar (default off).
-- `progressColor`: whether the usage numbers shift color with usage (default on). When off, falls back to three fixed tiers: red above 90%, yellow above 70%, blue otherwise.
-- `autoManageSettings`: whether the plugin may adjust Pi's built-in fallback compaction settings for you (default off).
-- `safeCompaction`: whether to enable safe compaction overflow defense and thinking stripping (default true).
-- `maxToolResultChars`: the character limit for a single output before it enters the context; anything beyond is trimmed (default 50000; set 0 to disable).
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `threshold` | `75` | Global trigger line; session overrides take precedence |
+| `customFooter` | `false` | Use `setStatus` by default; replace the footer when enabled |
+| `progressColor` | `true` | Color takeover-footer usage by usage divided by threshold |
+| `autoManageSettings` | `false` | Allow automatic changes to native compaction settings in Pi's main settings file |
+| `safeCompaction` | `true` | Clean summary input, budget the complete estimated request, and cancel on failure |
+| `maxToolResultChars` | `50000` | Text limit per tool result; `0` disables trimming |
 
----
+Compaction, trimming, and emergency counts are saved in session entries and restored on resume. Configuration and statistics are not an independent full-history backup.
 
-## FAQ
+## Status display
 
-**Do I need to know how to code?**
-No. Install and restart Pi — the defaults just work.
+The default `compact: 75%` status does not replace another extension's footer. After `/auto-compact footer`, the stats line can show `14.1%/1.0M (auto:75%)`, or `(auto:compacting...)` during compaction.
 
-**Does it touch my files?**
-No. The plugin only works with the conversation history itself; it never reads or writes your project files.
+The gradient represents usage relative to the trigger line, not an independent risk assessment. When disabled, fixed tiers are red above 90%, yellow above 70%, and blue otherwise.
 
-**When does it compact?**
-Two situations: usage reaches 75% while the AI happens to be between steps, or a single operation pushes usage past 92% instantly. Otherwise it stays out of the way.
+<p align="center">
+  <img src="./assets/progress-green.png" alt="Green progress at low usage" width="85%" />
+</p>
+<p align="center"><em>Low usage</em></p>
 
-**Does compacting cost extra?**
-Compaction is one AI call (reading the earlier content and writing a summary) — about the same cost as an ordinary chat. The default 75% trigger line exists precisely to pick a good moment for it.
+<p align="center">
+  <img src="./assets/progress-yellow.png" alt="Amber progress near half of the trigger line" width="85%" />
+</p>
+<p align="center"><em>Near half of the trigger line</em></p>
 
----
+<p align="center">
+  <img src="./assets/progress-red.png" alt="Red progress approaching the trigger line" width="85%" />
+</p>
+<p align="center"><em>Approaching the trigger line</em></p>
 
-## For Developers
+## Scope and compatibility
+
+- **For:** lightweight output limits, branch-specific fact assistance, and complete-summary checks on top of Pi.
+- **Not:** lossless memory, an independent raw archive, a background reviewer, or a prefix-cache accelerator.
+- Avoid multiple extensions that take over `session_before_compact`. Similarly named packages can also collide on commands or configuration paths.
+- The default status line can coexist with UI extensions; takeover-footer ownership needs coordination.
+- This extension changes model-visible tool output and session content, and reads/writes its configuration and session statistics. It changes Pi's main settings only after explicit settings-management opt-in or `setup` confirmation. It does not modify project business files.
+- Summarization uses the current model and consumes time and tokens. Lower thresholds can increase compaction frequency and reduce prefix-cache reuse. There is no universal cost-saving guarantee.
+
+## Development
 
 ```bash
-npm test           # run tests
-npm run typecheck  # type check
+npm test
+npm run typecheck
 ```
-
----
 
 ## License
 
-[MIT](LICENSE) © betterlmy
-Design inspiration from `pi-smart-compact` (alpertarhan) and `agent-context-guard-pi` (j1nn0).
+[MIT](./LICENSE). Design inspiration from `pi-smart-compact` (alpertarhan) and `agent-context-guard-pi` (j1nn0).

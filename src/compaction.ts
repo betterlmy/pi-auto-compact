@@ -21,6 +21,7 @@ export function executeCompaction(
 ): void {
   if (state.isCompacting) return;
   state.isCompacting = true;
+  const sessionEpoch = state.sessionEpoch;
   updateStatusDisplay(state, ctx);
 
   if (ctx.hasUI) {
@@ -42,6 +43,7 @@ export function executeCompaction(
     ctx.compact({
       customInstructions: instructions,
       onComplete: () => {
+        if (state.sessionEpoch !== sessionEpoch) return;
         state.isCompacting = false;
         state.lastCheckedPercent = null;
         recordStats(pi, state.stats, {
@@ -50,26 +52,32 @@ export function executeCompaction(
         }, { markCompactionTime: true });
         updateStatusDisplay(state, ctx);
         if (ctx.hasUI) {
-          ctx.ui.notify("[Auto Compact] 压缩完成，已释放上下文空间，正在自动恢复任务执行...", "info");
+          ctx.ui.notify("[Auto Compact] 压缩完成。", "info");
         }
 
         if (resumeTask) {
-          // 自动压缩后发送隐式续跑消息唤醒 Agent 继续执行未完成的任务循环。
-          // 不自行判断空闲：sendMessage 在流式进行时会自动转为 steer 排队，
-          // 空闲时触发新回合；自行判空闲返回会静默丢弃续跑消息。
+          // 等待宿主刷新排队输入；已有新任务或自然续跑时不再额外唤醒。
           setImmediate(() => {
-            pi.sendMessage(
-              {
-                customType: "auto-compact/resume",
-                content: "Context compaction completed. Continue the current task based on the context summary.",
-                display: false,
-              },
-              { triggerTurn: true }
-            );
+            if (state.sessionEpoch !== sessionEpoch || !ctx.isIdle() || ctx.hasPendingMessages()) return;
+            try {
+              pi.sendMessage(
+                {
+                  customType: "auto-compact/resume",
+                  content: "Context compaction completed. Continue the current task based on the context summary.",
+                  display: false,
+                },
+                { triggerTurn: true, deliverAs: "followUp" }
+              );
+            } catch (err) {
+              if (ctx.hasUI) {
+                ctx.ui.notify(`[Auto Compact] 压缩已完成，但续跑消息投递失败：${err instanceof Error ? err.message : String(err)}。请检查后手动继续。`, "warning");
+              }
+            }
           });
         }
       },
       onError: (err) => {
+        if (state.sessionEpoch !== sessionEpoch) return;
         state.isCompacting = false;
         // 保留 lastCheckedPercent 为本次触发点：失败后不在同一水位原地重试，待用量增长后自动放行
         updateStatusDisplay(state, ctx);

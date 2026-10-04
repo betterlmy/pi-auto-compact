@@ -44,6 +44,7 @@ function createMockCtx(options = {}) {
   const ctx = {
     hasUI: options.hasUI ?? true,
     isIdle: () => options.isIdle ?? true,
+    hasPendingMessages: () => options.hasPendingMessages ?? false,
     ui: {
       theme: {
         fg: (color, text) => `[${color}]${text}[/${color}]`,
@@ -63,7 +64,7 @@ function createMockCtx(options = {}) {
     sessionManager: {
       getCwd: () => "/mock/cwd",
       getSessionName: () => "mock-session",
-      getEntries: () => options.entries || [],
+      getBranch: () => options.entries || [],
     },
     model: {
       id: "mock-model",
@@ -362,7 +363,7 @@ describe("index.ts: 扩展核心集成测试", () => {
     assert.equal(settings.compaction.reserveTokens, 60000, "已最优时不得被改写回 50000");
   });
 
-  it("12. 紧急熔断续跑在非空闲时也投递（交由 sendMessage 排队）", async () => {
+  it("12. 压缩后宿主已自然续跑时不额外发送续跑消息", async () => {
     const pi = createMockPi();
     extensionFactory(pi);
 
@@ -377,7 +378,7 @@ describe("index.ts: 扩展核心集成测试", () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     const sent = pi._getSentMessages();
-    assert.ok(sent.some((s) => s.msg.customType === "auto-compact/resume"), "非空闲时不得静默丢弃续跑消息");
+    assert.equal(sent.length, 0, "宿主已运行时不得重复启动");
   });
 
   it("13. tool_result 超限截断：大输出首尾保留并计数，正常输出零拷贝放行", () => {
@@ -418,7 +419,7 @@ describe("index.ts: 扩展核心集成测试", () => {
 
     const opts = ctx._getCompactOptions();
     assert.ok(opts.customInstructions.includes("紧急熔断场景"), "熔断触发必须附带断点保全指令");
-    assert.ok(opts.customInstructions.includes("被中断工具调用"));
+    assert.ok(opts.customInstructions.includes("最后工具调用"));
 
     const entries = pi._getAppendedEntries();
     const statEntry = entries.find((e) => e.data && e.data.compactions === 1);
@@ -538,7 +539,51 @@ describe("index.ts: 扩展核心集成测试", () => {
     );
   });
 
-  it("19. agent_settled 沉淀压缩完成后同样自动发送续跑消息", async () => {
+  it("排队输入、会话切换及树导航不会收到旧续跑消息", async () => {
+    for (const change of ["pending", "session_start", "session_tree", "session_shutdown"]) {
+      const pi = createMockPi();
+      extensionFactory(pi);
+      const ctx = createMockCtx({ percent: 93, compactBehavior: "sync-complete", hasPendingMessages: change === "pending" });
+      pi._getHandler("turn_end")({ message: { role: "assistant", content: [{ type: "toolCall", name: "read" }] } }, ctx);
+      if (change !== "pending") pi._getHandler(change)({}, ctx);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(pi._getSentMessages().length, 0, change);
+    }
+  });
+
+  it("中途压缩失败时不会发送续跑消息", async () => {
+    const pi = createMockPi();
+    extensionFactory(pi);
+    const ctx = createMockCtx({ percent: 93, compactBehavior: "sync-error" });
+    pi._getHandler("turn_end")({ message: { role: "assistant", content: [{ type: "toolCall", name: "read" }] } }, ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(pi._getSentMessages().length, 0);
+  });
+
+  it("续跑消息同步投递失败时告警，不产生未捕获异步异常", async () => {
+    const pi = createMockPi();
+    pi.sendMessage = () => { throw new Error("消息投递失败"); };
+    extensionFactory(pi);
+    const ctx = createMockCtx({ percent: 93, compactBehavior: "sync-complete" });
+    pi._getHandler("turn_end")({ message: { role: "assistant", content: [{ type: "toolCall", name: "read" }] } }, ctx);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(ctx._notifications.some((n) => n.msg.includes("续跑消息投递失败")));
+  });
+
+  it("旧会话延迟回调不会修改新会话统计或启动任务", async () => {
+    const pi = createMockPi();
+    extensionFactory(pi);
+    const ctx = createMockCtx({ percent: 93 });
+    pi._getHandler("turn_end")({ message: { role: "assistant", content: [{ type: "toolCall", name: "read" }] } }, ctx);
+    const callback = ctx._getCompactOptions().onComplete;
+    pi._getHandler("session_start")({}, createMockCtx());
+    callback();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(pi._getSentMessages().length, 0);
+    assert.equal(pi._getAppendedEntries().length, 0);
+  });
+
+  it("19. agent_settled 空闲压缩完成后不重启已结束任务", async () => {
     const pi = createMockPi();
     extensionFactory(pi);
 
@@ -553,9 +598,6 @@ describe("index.ts: 扩展核心集成测试", () => {
 
     await new Promise((resolve) => setImmediate(resolve));
     const sent = pi._getSentMessages();
-    assert.ok(
-      sent.some((s) => s.msg.customType === "auto-compact/resume" && s.opts.triggerTurn === true),
-      "沉淀压缩完成后也必须自动续跑，不中断任务等待用户"
-    );
+    assert.equal(sent.length, 0, "空闲整理不得唤醒已结束任务");
   });
 });

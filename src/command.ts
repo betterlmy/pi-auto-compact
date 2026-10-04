@@ -107,13 +107,13 @@ export async function handleAutoCompactCommand(
     if (!ctx.hasUI) return;
     const status = checkNativeSafetyNet();
     if (status.isOptimal) {
-      ctx.ui.notify("原生安全网已处于最优状态 (enabled=true, reserveTokens=50000)。", "info");
+      ctx.ui.notify("原生压缩已开启，响应预留不低于 50000 tokens；触发比例随模型窗口变化。", "info");
       return;
     }
 
     const confirm = await ctx.ui.confirm(
       "配置原生安全网",
-      `是否将 settings.json 中的原生压缩配置为 reserveTokens=50000 作为 95% 极端暴涨兜底？\n(当前: enabled=${status.enabled}, reserveTokens=${status.reserveTokens})`
+      `是否开启原生压缩并将 settings.json 中的 reserveTokens 设为 50000？\n触发线为窗口减去 50000 tokens，小窗口模型可能过早触发；这不是固定 95% 阈值。\n(当前: enabled=${status.enabled}, reserveTokens=${status.reserveTokens})`
     );
 
     if (confirm) {
@@ -184,7 +184,7 @@ export async function handleAutoCompactCommand(
       : `${state.config.threshold}% (跟随全局)`;
 
     ctx.ui.notify(
-      `[Auto Compact 状态]\n- 当前阈值: ${thresholdDesc}\n- 紧急熔断线: ${EMERGENCY_THRESHOLD}%\n- 当前上下文用量: ${cur}\n- 工具结果截断上限: ${truncateLimit > 0 ? `${truncateLimit} 字符` : "禁用"}\n- 安全压缩守护: ${state.config.safeCompaction === false ? "关闭" : "开启"}\n- 内联 Footer: ${state.config.customFooter ? "开启" : "关闭"}\n- 进度渐变配色: ${state.config.progressColor === false ? "关闭" : "开启"}\n- 自动守护设置: ${state.config.autoManageSettings ? "开启" : "关闭"}\n\n【会话统计】\n${formatStats(state.stats)}`,
+      `[Auto Compact 状态]\n- 当前阈值: ${thresholdDesc}\n- 紧急熔断线: ${EMERGENCY_THRESHOLD}%\n- 当前上下文用量: ${cur}\n- 工具结果截断上限: ${truncateLimit > 0 ? `${truncateLimit} 字符` : "禁用"}\n- 安全压缩守护: ${state.config.safeCompaction === false ? "关闭" : "开启"}\n- 摘要失败策略: ${state.config.safeCompaction === false ? "由 Pi 原生处理" : "取消压缩，保留原上下文，不自动续跑"}\n- 内联 Footer: ${state.config.customFooter ? "开启" : "关闭"}\n- 进度渐变配色: ${state.config.progressColor === false ? "关闭" : "开启"}\n- 自动守护设置: ${state.config.autoManageSettings ? "开启" : "关闭"}\n\n【会话统计】\n${formatStats(state.stats)}`,
       "info"
     );
     return;

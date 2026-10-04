@@ -32,7 +32,7 @@ describe("facts.ts: 确定性事实提取器", () => {
     ];
 
     const sessionManager = {
-      getEntries: () => mockEntries,
+      getBranch: () => mockEntries,
     };
 
     const facts = extractSessionFacts(sessionManager);
@@ -50,8 +50,33 @@ describe("facts.ts: 确定性事实提取器", () => {
     assert.ok(prompt.includes("研发自动压缩插件并发布"));
   });
 
+  it("只提取当前分支，不读取其他分支记录", () => {
+    const facts = extractSessionFacts({
+      getEntries: () => { throw new Error("不得扫描所有分支"); },
+      getBranch: () => [{ type: "message", message: { role: "assistant", content: [
+        { type: "toolCall", name: "edit", arguments: { path: "active.ts" } },
+      ] } }],
+    });
+    assert.deepEqual(facts.modifiedFiles, ["active.ts"]);
+  });
+
+  it("普通中文请求保留最近原文，但不推断为显式目标", () => {
+    const facts = extractSessionFacts({ getBranch: () => [
+      { type: "message", message: { role: "user", content: "旧请求" } },
+      { type: "message", message: { role: "user", content: [{ type: "text", text: "修复登录失败，保留旧接口兼容性" }] } },
+    ] });
+    assert.equal(facts.goalText, undefined);
+    assert.equal(facts.recentUserRequest, "修复登录失败，保留旧接口兼容性");
+    assert.ok(buildCompactionInstructions(facts).includes(facts.recentUserRequest));
+    const bounded = extractSessionFacts({ getBranch: () => [
+      { type: "message", message: { role: "user", content: "长请求".repeat(10000) } },
+    ] });
+    assert.ok(bounded.recentUserRequest.length <= 2000);
+    assert.ok(bounded.recentUserRequest.includes("已截断"));
+  });
+
   it("当会话没有工具调用时，应优雅返回空列表", () => {
-    const facts = extractSessionFacts({ getEntries: () => [] });
+    const facts = extractSessionFacts({ getBranch: () => [] });
     assert.deepEqual(facts.modifiedFiles, []);
     assert.deepEqual(facts.readFiles, []);
     assert.deepEqual(facts.recentCommands, []);
@@ -67,7 +92,7 @@ describe("facts.ts: 确定性事实提取器", () => {
       content.push({ type: "toolCall", name: "edit", arguments: { path: `src/f${i}.ts` } });
     }
     const facts = extractSessionFacts({
-      getEntries: () => [{ type: "message", message: { role: "assistant", content } }],
+      getBranch: () => [{ type: "message", message: { role: "assistant", content } }],
     });
 
     assert.equal(facts.modifiedFiles.length, MAX_MODIFIED_FILES);
@@ -76,14 +101,14 @@ describe("facts.ts: 确定性事实提取器", () => {
   });
 
   it("emergency 场景追加断点保全指令段，settled 场景不追加", () => {
-    const facts = extractSessionFacts({ getEntries: () => [] });
+    const facts = extractSessionFacts({ getBranch: () => [] });
 
     const settledPrompt = buildCompactionInstructions(facts, undefined, "settled");
     assert.ok(!settledPrompt.includes("紧急熔断场景"), "settled 场景不得携带熔断附加指令");
 
     const emergencyPrompt = buildCompactionInstructions(facts, undefined, "emergency");
     assert.ok(emergencyPrompt.includes("紧急熔断场景"));
-    assert.ok(emergencyPrompt.includes("被中断工具调用"));
+    assert.ok(emergencyPrompt.includes("最后工具调用"));
     assert.ok(emergencyPrompt.includes("原始用户意图"));
   });
 
@@ -95,7 +120,7 @@ describe("facts.ts: 确定性事实提取器", () => {
     content.push({ type: "toolCall", name: "edit", arguments: { path: "src/old.ts" } });
 
     const facts = extractSessionFacts({
-      getEntries: () => [{ type: "message", message: { role: "assistant", content } }],
+      getBranch: () => [{ type: "message", message: { role: "assistant", content } }],
     });
 
     assert.equal(facts.modifiedFiles.length, MAX_MODIFIED_FILES);

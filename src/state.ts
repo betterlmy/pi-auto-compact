@@ -11,6 +11,8 @@ export interface ExtensionState {
   isLocalThreshold: boolean;
   /** 是否有压缩正在进行；陈旧值会让所有触发点被守卫永久挡死 */
   isCompacting: boolean;
+  /** 会话切换、树导航或关闭时递增，使旧回调失效。 */
+  sessionEpoch: number;
   /** 上次触发点，或阈值以下的最近水位；null 表示待评估 */
   lastCheckedPercent: number | null;
   /** 自定义 Footer 触发的重绘回调 */
@@ -26,6 +28,7 @@ export function createExtensionState(): ExtensionState {
     config: loadConfig(),
     isLocalThreshold: false,
     isCompacting: false,
+    sessionEpoch: 0,
     lastCheckedPercent: null,
     footerRegistered: false,
     stats: emptyStats(),

@@ -5,6 +5,8 @@ export interface SessionFacts {
   readFiles: string[];
   recentCommands: string[];
   goalText?: string;
+  /** 最近用户请求的有界原文，不推断其是否为未完成目标。 */
+  recentUserRequest?: string;
 }
 
 /** 压缩触发场景：settled = Agent 空闲沉淀；emergency = 工具暴涨中途熔断并续跑 */
@@ -14,12 +16,13 @@ export type TriggerScenario = "settled" | "emergency";
 export const MAX_MODIFIED_FILES = 30;
 export const MAX_READ_FILES = 15;
 export const MAX_RECENT_COMMANDS = 8;
+export const MAX_USER_REQUEST_CHARS = 2000;
 
 /**
  * 确定性事实提取器：从会话历史中提取修改的文件、查阅的文件与关键执行命令
  * 避免总结模型因上下文过大而遗忘精确路径或产生幻觉。
  */
-export function extractSessionFacts(sessionManager?: { getEntries(): any[] } | null): SessionFacts {
+export function extractSessionFacts(sessionManager?: { getBranch(): any[] } | null): SessionFacts {
   // 按触碰顺序记录修改文件，重复出现时移到末尾，保证截断后保留最近改动的文件
   const modifiedOrder: string[] = [];
   const modifiedSet = new Set<string>();
@@ -27,6 +30,7 @@ export function extractSessionFacts(sessionManager?: { getEntries(): any[] } | n
   const commands: string[] = [];
   const commandSet = new Set<string>();
   let goalText: string | undefined;
+  let recentUserRequest: string | undefined;
 
   const trackModified = (path: string) => {
     if (modifiedSet.has(path)) {
@@ -37,7 +41,7 @@ export function extractSessionFacts(sessionManager?: { getEntries(): any[] } | n
     modifiedOrder.push(path);
   };
 
-  const entries = sessionManager?.getEntries?.() || [];
+  const entries = sessionManager?.getBranch?.() || [];
   for (const entry of entries) {
     if (entry.type === "message" && entry.message) {
       const msg = entry.message;
@@ -53,6 +57,12 @@ export function extractSessionFacts(sessionManager?: { getEntries(): any[] } | n
                   .map((c: any) => c.text)
                   .join("")
               : "";
+        if (text.trim()) {
+          const request = text.trim();
+          recentUserRequest = request.length <= MAX_USER_REQUEST_CHARS
+            ? request
+            : `${request.slice(0, MAX_USER_REQUEST_CHARS - "\n[最近用户请求已截断]".length)}\n[最近用户请求已截断]`;
+        }
         const goalMatch = text.match(/\/goal(?:\s+\[[^\]]*\])?\s+([^\n]+)/i);
         if (goalMatch && goalMatch[1]) {
           goalText = goalMatch[1].trim();
@@ -107,6 +117,7 @@ export function extractSessionFacts(sessionManager?: { getEntries(): any[] } | n
     readFiles: readOnlyFiles,
     recentCommands,
     goalText,
+    recentUserRequest,
   };
 }
 
@@ -127,16 +138,19 @@ export function buildCompactionInstructions(
   const factsLines: string[] = [];
 
   if (facts.goalText) {
-    factsLines.push(`- 当前任务核心目标: ${facts.goalText}`);
+    factsLines.push(`- 显式声明的任务目标: ${facts.goalText}`);
+  }
+  if (facts.recentUserRequest) {
+    factsLines.push(`- 最近用户请求（历史原文，不代表仍需执行）:\n${facts.recentUserRequest}`);
   }
   if (facts.modifiedFiles.length > 0) {
-    factsLines.push(`- 确定已修改/新建的文件:\n  ${facts.modifiedFiles.map((f) => `* ${f}`).join("\n  ")}`);
+    factsLines.push(`- write/edit 调用涉及的文件（不证明执行成功）:\n  ${facts.modifiedFiles.map((f) => `* ${f}`).join("\n  ")}`);
   }
   if (facts.readFiles.length > 0) {
-    factsLines.push(`- 确定已查阅的核心文件:\n  ${facts.readFiles.map((f) => `* ${f}`).join("\n  ")}`);
+    factsLines.push(`- read 调用涉及的文件（不证明执行成功）:\n  ${facts.readFiles.map((f) => `* ${f}`).join("\n  ")}`);
   }
   if (facts.recentCommands.length > 0) {
-    factsLines.push(`- 最近执行的关键命令:\n  ${facts.recentCommands.map((c) => `* \`${c}\``).join("\n  ")}`);
+    factsLines.push(`- 最近调用的命令（不证明执行成功）:\n  ${facts.recentCommands.map((c) => `* \`${c}\``).join("\n  ")}`);
   }
 
   if (factsLines.length > 0) {

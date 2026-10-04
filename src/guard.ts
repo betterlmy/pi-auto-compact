@@ -58,8 +58,13 @@ export function runContextGuard(pi: ExtensionAPI, ctx: ExtensionContext, summary
       const lowerSummary = summary.toLowerCase();
       const anyHit = keywords.length === 0 || keywords.some((kw) => lowerSummary.includes(kw.toLowerCase()));
       if (!anyHit) {
-        missingItems.push(`当前未完成任务目标: ${facts.goalText}`);
+        missingItems.push(`显式声明的任务目标: ${facts.goalText}`);
       }
+    }
+
+    // 最近请求保留有界原文，不将其解释为仍未完成的任务。
+    if (facts.recentUserRequest && !summary.includes(facts.recentUserRequest)) {
+      missingItems.push(`最近用户请求（历史原文，不代表仍需执行）: ${facts.recentUserRequest}`);
     }
 
     // 检查变更文件清单

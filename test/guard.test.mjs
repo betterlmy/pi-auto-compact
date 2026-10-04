@@ -18,7 +18,7 @@ function createMockCtx(entries = [], options = {}) {
   return {
     hasUI: options.hasUI ?? true,
     sessionManager: {
-      getEntries: () => entries,
+      getBranch: () => entries,
     },
     ui: {
       theme: { fg: (_color, text) => text },
@@ -86,7 +86,7 @@ describe("guard.ts: Context Guard 独立测试", () => {
         { type: "message", message: { role: "user", content: "/goal 研发自动压缩插件并发布" } },
       ];
       const ctx = createMockCtx(entries);
-      runContextGuard(pi, ctx, "完成了自动压缩插件的基本框架搭建");
+      runContextGuard(pi, ctx, "完成了自动压缩插件的基本框架搭建。最近请求：/goal 研发自动压缩插件并发布");
       assert.equal(pi._getSentMessages().length, 0, "命中关键词时不应补齐");
     });
 
@@ -108,7 +108,7 @@ describe("guard.ts: Context Guard 独立测试", () => {
         { type: "message", message: { role: "user", content: "/goal Fix Authentication Bug" } },
       ];
       const ctx = createMockCtx(entries);
-      runContextGuard(pi, ctx, "resolved the authentication issue in login flow");
+      runContextGuard(pi, ctx, "resolved the authentication issue in login flow。最近请求：/goal Fix Authentication Bug");
       assert.equal(pi._getSentMessages().length, 0, "大小写不敏感匹配应命中");
     });
 
@@ -131,6 +131,18 @@ describe("guard.ts: Context Guard 独立测试", () => {
       runContextGuard(pi, ctx, "some summary without any context");
       assert.equal(pi._getSentMessages().length, 0);
     });
+  });
+
+  it("普通用户请求遗漏时补回原文，不当作未完成目标", () => {
+    const pi = createMockPi();
+    const request = "修复登录失败，保留旧接口兼容性";
+    const ctx = createMockCtx([{ type: "message", message: { role: "user", content: request } }]);
+    runContextGuard(pi, ctx, "已修改登录模块");
+    const sent = pi._getSentMessages();
+    assert.equal(sent.length, 1);
+    assert.ok(sent[0].msg.content.includes(request));
+    assert.ok(sent[0].msg.content.includes("不代表仍需执行"));
+    assert.equal(sent[0].opts.triggerTurn, false);
   });
 
   describe("runContextGuard 文件遗漏检测", () => {
@@ -214,7 +226,7 @@ describe("guard.ts: Context Guard 独立测试", () => {
       const ctx = {
         hasUI: true,
         sessionManager: {
-          getEntries: () => {
+          getBranch: () => {
             throw new Error("boom");
           },
         },

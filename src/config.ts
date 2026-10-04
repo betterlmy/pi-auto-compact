@@ -16,12 +16,11 @@ export const CUSTOM_INSTRUCTIONS =
   "总结上下文，重点保留关键任务目标、约束、已完成改动及当前进行中的步骤";
 
 /**
- * 紧急熔断场景的附加指令：单次工具调用把上下文冲过熔断线后被拦腰截断，
- * 总结必须额外保全断点信息，续跑回合才能无缝接上。
+ * 工具 turn 完成后的紧急压缩附加指令：保全最后操作状态与未完成意图。
  */
 export const EMERGENCY_INSTRUCTIONS = [
-  "【紧急熔断场景附加要求】本次压缩发生在工具执行中途，任务将被强制续跑，除基础事实外必须额外保留：",
-  "- 被中断工具调用的名称、参数与已获得的部分结果（若可见），以及本次工具调用的未完成意图；",
+  "【紧急熔断场景附加要求】本次压缩发生在工具 turn 完成后的边界，若仍有未完成任务可续跑，除基础事实外必须额外保留：",
+  "- 最后工具调用的名称、参数与已获得的结果（若可见），以及本次工具调用的未完成意图；不要假定工具执行成功或被中断；",
   "- 中断前最后一步操作的精确状态：已完成的动作、正在进行的动作、下一步计划；",
   "- 触发本次工具调用的原始用户意图，确保续跑第一回合即可直接恢复执行。",
 ].join("\n");
@@ -39,7 +38,7 @@ export interface AutoCompactConfig {
    */
   customFooter?: boolean;
   /**
-   * 是否自动管理 settings.json 原生压缩参数作为 95% 兜底安全网
+   * 是否自动管理 settings.json 原生压缩参数（预留 50000 tokens，比例随窗口变化）
    * 默认 false（开源规范：未经用户明确许可不擅自改写主设置文件）
    */
   autoManageSettings?: boolean;
@@ -49,7 +48,7 @@ export interface AutoCompactConfig {
    */
   progressColor?: boolean;
   /**
-   * 是否启用安全压缩防溢出守护（剥离 thinking、预算硬上限截断、模型异常确定性兜底自愈）
+   * 是否启用摘要防护（剥离 thinking、完整请求估算预算、失败时取消压缩保留原上下文）
    * 默认 true
    */
   safeCompaction?: boolean;
@@ -150,14 +149,14 @@ export function checkNativeSafetyNet(customSettingsPath = SETTINGS_PATH): Safety
     const enabled = compaction.enabled ?? true;
     const reserveTokens = compaction.reserveTokens ?? 16384;
 
-    // 推荐模式：原生 enabled: true 且 reserveTokens 不低于推荐值，充当 95% 极限熔断网
+    // 检测预留 token 配置；这不代表固定比例或对所有模型都最优。
     const isOptimal = enabled === true && reserveTokens >= NATIVE_RESERVE_TOKENS;
 
     let message: string | undefined;
     if (!enabled) {
       message = "原生压缩处于关闭状态，单轮极端暴涨时无原生重试兜底。建议启用并设置 reserveTokens 为安全网。";
     } else if (reserveTokens < NATIVE_RESERVE_TOKENS) {
-      message = `当前原生 reserveTokens 为 ${reserveTokens}，在大窗口模型下可能早于预期触发抢跑。推荐值：${NATIVE_RESERVE_TOKENS}。`;
+      message = `当前原生 reserveTokens 为 ${reserveTokens}，响应预留少于此扩展建议的 token 数。推荐值：${NATIVE_RESERVE_TOKENS}。`;
     }
 
     return { isOptimal, enabled, reserveTokens, message };

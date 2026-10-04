@@ -6,7 +6,6 @@ const jiti = createJiti(import.meta.url);
 const {
   sanitizeAndFormatMessage,
   serializeMessagesWithBudget,
-  buildDeterministicFallbackSummary,
   formatFileOperationsXml,
   handleSafeCompaction,
 } = jiti("../src/safe-compaction.ts");
@@ -102,22 +101,23 @@ describe("safe-compaction.ts: 安全压缩与防溢出守护", () => {
 
     assert.ok(result.includes("初始关键任务"), "必须保留头部任务背景");
     assert.ok(result.includes("当前最新指示") || result.includes("正在运行测试验证"), "必须保留尾部最新状态");
-    assert.ok(result.includes("此处省略了中间"), "必须包含省略中间历史标记");
-    assert.ok(result.length <= maxBudget + 200, `总长度 ${result.length} 必须受控在预算附近`);
+    assert.ok(result.includes("历史中部已省略"), "必须包含省略中间历史标记");
+    assert.ok(result.length <= maxBudget, `总长度 ${result.length} 必须严格受控`);
   });
 
-  it("buildDeterministicFallbackSummary 能正确生成结构化快照", () => {
-    const facts = {
-      goalText: "修复压缩死锁 bug",
-      modifiedFiles: ["src/index.ts", "src/safe-compaction.ts"],
-      recentCommands: ["npm test", "npm run typecheck"],
-    };
-
-    const summary = buildDeterministicFallbackSummary(facts, "上一轮摘要检查点");
-    assert.ok(summary.includes("上一轮摘要检查点"));
-    assert.ok(summary.includes("## Goal\n修复压缩死锁 bug"));
-    assert.ok(summary.includes("src/safe-compaction.ts"));
-    assert.ok(summary.includes("`npm test`"));
+  it("首尾单条超长消息和极小预算都不能突破字符上限", () => {
+    const messages = [
+      { role: "user", content: "头".repeat(10000) },
+      { role: "assistant", content: [{ type: "text", text: "尾".repeat(10000) }] },
+    ];
+    for (const budget of [0, 1, 10, 100, 2000]) {
+      const text = serializeMessagesWithBudget(messages, budget);
+      assert.ok(text.length <= budget);
+      if (budget >= 100) {
+        assert.ok(text.startsWith("[User]:"));
+        assert.ok(text.endsWith("尾"));
+      }
+    }
   });
 
   it("formatFileOperationsXml 输出标准 XML 标签", () => {
@@ -137,13 +137,14 @@ describe("safe-compaction.ts: 安全压缩与防溢出守护", () => {
           completedModel = model;
           completedPrompt = context.messages[0].content[0].text;
           return {
+            stopReason: "stop",
             content: [{ type: "text", text: "## Goal\n用户要求优化性能\n\n## Progress\n### Done\n- [x] 优化完成" }],
             usage: { totalTokens: 120, input: 100, output: 20 },
           };
         },
       },
       sessionManager: {
-        getEntries: () => [
+        getBranch: () => [
           {
             type: "message",
             message: {
@@ -201,7 +202,7 @@ describe("safe-compaction.ts: 安全压缩与防溢出守护", () => {
     assert.ok(!completedPrompt.includes("思考了 50000 字"), "发给模型的 Prompt 绝不包含 thinking");
   });
 
-  it("handleSafeCompaction 在模型抛错（如 400 ContextWindowExceeded）时自动切换确定性快照兜底自愈", async () => {
+  it("handleSafeCompaction 在模型抛错时取消压缩，不生成快照", async () => {
     const notifications = [];
     const mockCtx = {
       model: { id: "claude-3-5-sonnet", contextWindow: 204800 },
@@ -211,7 +212,7 @@ describe("safe-compaction.ts: 安全压缩与防溢出守护", () => {
         },
       },
       sessionManager: {
-        getEntries: () => [
+        getBranch: () => [
           {
             type: "message",
             message: {
@@ -240,19 +241,15 @@ describe("safe-compaction.ts: 安全压缩与防溢出守护", () => {
     };
 
     const result = await handleSafeCompaction(event, mockCtx, mockState);
-    // 不得向外抛错，必须安全返回 compaction，使 firstKeptEntryId 落地并释放空间
-    assert.ok(result && result.compaction);
-    assert.equal(result.compaction.firstKeptEntryId, "entry-emergency-999");
-    assert.ok(result.compaction.summary.includes("彻底修复生产死锁"));
-    assert.ok(result.compaction.summary.includes("上下文自愈压缩"));
-    assert.ok(notifications.some((n) => n.msg.includes("已自动切换确定性事实快照兜底自愈")));
+    assert.deepEqual(result, { cancel: true });
+    assert.ok(notifications.some((n) => n.msg.includes("保留原上下文")));
   });
 
   it("handleSafeCompaction 在 signal 已取消时返回 cancel: true", async () => {
     const mockCtx = {
       model: { id: "claude-3-5-sonnet", contextWindow: 204800 },
       modelRegistry: {},
-      sessionManager: { getEntries: () => [] },
+      sessionManager: { getBranch: () => [] },
       hasUI: false,
     };
 
@@ -270,6 +267,80 @@ describe("safe-compaction.ts: 安全压缩与防溢出守护", () => {
 
     const result = await handleSafeCompaction(event, mockCtx, mockState);
     assert.deepEqual(result, { cancel: true });
+  });
+
+  it("完整请求预算包含系统提示、旧摘要、附加要求和输出预留", async () => {
+    let captured;
+    const ctx = {
+      model: { contextWindow: 16000, maxTokens: 2048 },
+      modelRegistry: { complete: async (_model, context, options) => {
+        captured = { context, options };
+        return { stopReason: "stop", content: [{ type: "text", text: "完整摘要" }] };
+      } },
+      sessionManager: { getBranch: () => [] },
+      hasUI: false,
+    };
+    const event = { preparation: {
+      firstKeptEntryId: "kept", previousSummary: "旧摘要".repeat(500),
+      messagesToSummarize: [{ role: "user", content: "请求".repeat(50000) }],
+    }, customInstructions: "附加要求".repeat(200) };
+    const result = await handleSafeCompaction(event, ctx, { config: { safeCompaction: true } });
+    assert.ok(result.compaction);
+    const chars = captured.context.systemPrompt.length + captured.context.messages[0].content[0].text.length;
+    assert.ok(Math.ceil(chars / 3) + captured.options.maxTokens <= Math.floor(ctx.model.contextWindow * 0.7));
+    assert.ok(captured.context.messages[0].content[0].text.includes(event.preparation.previousSummary));
+    assert.ok(captured.context.messages[0].content[0].text.includes(event.customInstructions));
+  });
+
+  it("固定提示放不下、小窗口或模型不可用时取消，不调用模型", async () => {
+    let calls = 0;
+    const ctx = {
+      model: { contextWindow: 4096, maxTokens: 4096 },
+      modelRegistry: { complete: async () => { calls++; } },
+      sessionManager: { getBranch: () => [] }, hasUI: false,
+    };
+    const event = { preparation: { firstKeptEntryId: "kept", previousSummary: "旧".repeat(100000) } };
+    for (const model of [ctx.model, undefined, { contextWindow: NaN }, { contextWindow: 16000, maxTokens: 2048 }]) {
+      assert.deepEqual(await handleSafeCompaction(event, { ...ctx, model }, { config: { safeCompaction: true } }), { cancel: true });
+    }
+    assert.equal(calls, 0);
+  });
+
+  it("输出截断、错误、取消、工具调用及空摘要都不能落地", async () => {
+    const event = { preparation: { firstKeptEntryId: "kept", messagesToSummarize: [] } };
+    for (const stopReason of ["length", "error", "aborted", "toolUse", undefined, "stop"]) {
+      const ctx = {
+        model: { contextWindow: 100000, maxTokens: 4096 },
+        modelRegistry: { complete: async () => ({ stopReason,
+          content: [{ type: "text", text: stopReason === "stop" ? "  " : "半份摘要" }] }) },
+        sessionManager: { getBranch: () => [] }, hasUI: false,
+      };
+      assert.deepEqual(await handleSafeCompaction(event, ctx, { config: { safeCompaction: true } }), { cancel: true });
+    }
+  });
+
+  it("事实读取异常也取消压缩，不能放行原生摘要绕过失败策略", async () => {
+    const ctx = { hasUI: false, sessionManager: { getBranch: () => { throw new Error("事实读取失败"); } } };
+    assert.deepEqual(await handleSafeCompaction({ preparation: { firstKeptEntryId: "kept" } }, ctx, { config: { safeCompaction: true } }), { cancel: true });
+  });
+
+  it("模型请求期间取消或切换会话分支时丢弃旧摘要", async () => {
+    for (const change of ["abort", "epoch", "leaf"]) {
+      const controller = new AbortController();
+      const state = { config: { safeCompaction: true }, sessionEpoch: 0 };
+      let leaf = "initial";
+      const ctx = {
+        model: { contextWindow: 100000, maxTokens: 4096 }, hasUI: false,
+        sessionManager: { getBranch: () => [], getSessionId: () => "session", getLeafId: () => leaf },
+        modelRegistry: { complete: async () => {
+          if (change === "abort") controller.abort();
+          if (change === "epoch") state.sessionEpoch++;
+          if (change === "leaf") leaf = "another";
+          return { stopReason: "stop", content: [{ type: "text", text: "旧摘要" }] };
+        } },
+      };
+      assert.deepEqual(await handleSafeCompaction({ preparation: { firstKeptEntryId: "kept" }, signal: controller.signal }, ctx, state), { cancel: true });
+    }
   });
 
   it("handleSafeCompaction 在 safeCompaction = false 时返回 undefined 放行原生", async () => {

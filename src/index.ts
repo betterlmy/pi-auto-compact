@@ -73,13 +73,16 @@ export default function (pi: ExtensionAPI) {
 
   // 4. 会话启动：默认加载全局配置，恢复会话级设置与持久化统计，再处理安全网
   pi.on("session_start", (_event, ctx) => {
+    state.sessionEpoch++;
+    state.isCompacting = false;
+    state.lastCheckedPercent = null;
     // 默认加载最新全局配置
     const globalConfig = loadConfig();
     state.config = { ...globalConfig };
     state.isLocalThreshold = false;
 
     // 检查当前会话条目：恢复统计与当前会话级阈值覆写（跨 resume 保持生效）
-    const entries = ctx.sessionManager?.getEntries?.() || [];
+    const entries = ctx.sessionManager?.getBranch?.() || [];
     state.stats = restoreStats(entries);
     const localThreshold = restoreSessionThreshold(entries);
     if (localThreshold !== null) {
@@ -96,7 +99,7 @@ export default function (pi: ExtensionAPI) {
       if (!status.isOptimal && ctx.hasUI) {
         const detail = status.message ? ` ${status.message}` : "";
         ctx.ui.notify(
-          `[Auto Compact] 提示：建议设置原生 reserveTokens=50000 作为 95% 兜底安全网。可执行 /auto-compact setup 自动配置。${detail}`,
+          `[Auto Compact] 提示：可用 /auto-compact setup 将原生响应预留设为 50000 tokens；实际触发比例随模型窗口变化，请先确认适用性。${detail}`,
           "info"
         );
       }
@@ -104,6 +107,14 @@ export default function (pi: ExtensionAPI) {
 
     updateStatusDisplay(state, ctx);
   });
+
+  const invalidateSession = () => {
+    state.sessionEpoch++;
+    state.isCompacting = false;
+    state.lastCheckedPercent = null;
+  };
+  pi.on("session_tree", invalidateSession);
+  pi.on("session_shutdown", invalidateSession);
 
   // 5. 常态压缩触发点：Agent 完全沉淀空闲后（agent_settled）
   pi.on("agent_settled", (_event, ctx) => {
@@ -127,13 +138,14 @@ export default function (pi: ExtensionAPI) {
     if (state.lastCheckedPercent !== null && currentPercent <= state.lastCheckedPercent) return;
 
     state.lastCheckedPercent = currentPercent;
-    executeCompaction(pi, state, ctx, currentPercent, true, "settled");
+    executeCompaction(pi, state, ctx, currentPercent, false, "settled");
   });
 
   // 6. 强制压缩触发点：多轮工具调用中途（turn_end）达到阈值即强制压缩并自动续跑
   pi.on("turn_end", (event, ctx) => {
     if (state.isCompacting) return;
     if (!hasToolCall(event.message)) return;
+    if (event.message.role !== "assistant" || event.message.stopReason === "aborted" || event.message.stopReason === "error" || ctx.signal?.aborted) return;
 
     const currentPercent = contextPercent(ctx);
     if (currentPercent === null) return;

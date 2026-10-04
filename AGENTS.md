@@ -2,7 +2,7 @@
 
 ## 仓库定位
 
-- Pi Coding Agent 的自动上下文管理扩展（npm 包 `@betterlmy/pi-auto-compact`），负责双水位自动压缩、事实提取、压缩后守护、工具结果截断与会话统计。
+- Pi Coding Agent 的轻量上下文保全与恢复辅助扩展（npm 包 `@betterlmy/pi-auto-compact`），负责阈值压缩、当前分支事实提取、摘要防护、压缩后有限检查、工具结果截断与会话统计。
 - 本文件约束 Agent 在本仓库的开发协作；面向用户的功能介绍见 README，不在本文件重复。
 - 上级规则：`~/AGENTS.md`；本文件只补充仓库特有事实，不重复上级内容。
 
@@ -14,13 +14,14 @@
 
 ## 目录结构
 
-- `src/`：全部扩展源码（12 个模块：index 注册钩子，compaction/guard 为核心流程，facts 为确定性事实提取，truncate/stats 为工具结果截断与会话统计，progress-color 为渐变进度配色，command/footer/status 为命令与显示）。
+- `src/`：全部扩展源码（13 个模块：index 注册钩子，compaction/guard 为核心流程，safe-compaction 为摘要预算与失败取消策略，facts 为分支事实提取，truncate/stats 为工具结果截断与会话统计，progress-color 为渐变进度配色，command/footer/status 为命令与显示）。
+- `assets/`：README 截图，随 npm 包分发。
 - `test/`：与源码同名的 `*.test.mjs` 测试文件。
 - `.github/workflows/`：`ci.yml`（push/PR 跑 typecheck + test）；`publish.yml`（npm 发布）。
 
 ## 常用命令（均在仓库根目录执行）
 
-- `npm test`：运行全部测试（当前 53 项）。
+- `npm test`：运行全部测试；测试数量以执行结果为准。
 - `npm run typecheck`：类型检查。
 - 两者均为只读检查，可放心运行；无 lint 脚本。
 
@@ -34,6 +35,8 @@
 ## 编码规则
 
 - 使用可判定措辞的最小实现；不增加未要求的功能、配置或历史兼容（遵循上级规则）。
+- 安全摘要失败、为空、截断或取消时不得提交降级快照；保留原上下文，不由本插件自动续跑。空闲压缩不得重启已结束任务。
+- 事实及分支敏感状态使用 `getBranch()`，不要扫描 `getEntries()` 混入其他分支。
 - 用户可感知阈值：`DEFAULT_THRESHOLD = 75`、`EMERGENCY_THRESHOLD = 92`（`src/config.ts`，后者固定不可配置）；改动这两个值必须同步 README 与 README.zh-CN.md 的对应描述。
 - 配置项新增/变更必须同步：`src/config.ts` 的类型与校验、README 双语的配置示例、`/auto-compact status` 输出（`src/command.ts`）。
 - 测试用 jiti 加载 TS 源码的模式见 `test/truncate.test.mjs`；新测试沿用该模式。
@@ -46,7 +49,7 @@
 ## Skill 索引
 
 - `commit`（`~/.agents/skills/commit/SKILL.md`）：提交与 push 规则。
-- `codegraph`（`~/.agents/skills/codegraph/SKILL.md`）：本仓库约 2000 行且无索引，按上级规则可直接读源码。
+- `codegraph`（`~/.agents/skills/codegraph/SKILL.md`）：结构、符号、调用关系与影响分析优先使用；按上级规则检查并维护索引。
 
 ## 防漂移
 

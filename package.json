@@ -1,11 +1,12 @@
 {
   "name": "@betterlmy/pi-auto-compact",
-  "version": "1.3.1",
-  "description": "Deterministic, context-guarded automatic compaction extension for Pi Coding Agent with dual watermarks and inline status display.",
+  "version": "1.3.2",
+  "description": "Lightweight context preservation and recovery assistance for Pi Coding Agent, with branch-scoped facts, guarded summaries, and bounded tool output.",
   "type": "module",
   "main": "src/index.ts",
   "files": [
     "src",
+    "assets",
     "README.md",
     "README.zh-CN.md",
     "LICENSE"
